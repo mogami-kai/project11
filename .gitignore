@@ -1,0 +1,10 @@
+.dev.vars
+.env
+.env.*
+**/*.log
+artifacts/
+node_modules/
+.DS_Store
+gas/**/.clasp.json
+gas_bak_*/**/.clasp.json
+tmp/

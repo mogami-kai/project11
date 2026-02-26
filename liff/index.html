@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Project1 Business Automation</title>
+  <link rel="stylesheet" href="./style.css" />
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div class="hero-top">
+        <h1>Project1</h1>
+        <span id="roleBadge" class="role-badge">USER</span>
+      </div>
+      <p>LINE業務自動化ポータル</p>
+      <div id="sessionInfo" class="session-info">LIFF未初期化</div>
+    </header>
+
+    <section class="card env-card">
+      <h2>接続先</h2>
+      <p id="workerEndpointLabel" class="mono"></p>
+      <label for="devApiKey">x-api-key (管理者検証用・任意)</label>
+      <input id="devApiKey" type="password" autocomplete="off" placeholder="任意" />
+      <p class="hint">全APIは Worker 経由で呼び出します。GAS はブラウザから直接呼びません。</p>
+    </section>
+
+    <nav class="tab-bar" aria-label="LIFF tabs">
+      <button class="tab active" data-tab="dashboard">今月状況</button>
+      <button class="tab" data-tab="traffic">交通費申請（手打ち）</button>
+      <button class="tab" data-tab="ocr">OCR申請</button>
+      <button class="tab" data-tab="expense">立替経費申請</button>
+      <button class="tab" data-tab="hotel">ホテル回答状況</button>
+      <button id="tabMonthly" class="tab tab-admin" data-tab="monthly">月次ファイル生成</button>
+    </nav>
+
+    <section id="screenDashboard" class="card screen active">
+      <div class="section-head">
+        <h2>今月状況</h2>
+        <div class="inline-actions">
+          <input id="dashboardMonth" type="month" />
+          <button id="dashboardRefreshButton" type="button">更新</button>
+        </div>
+      </div>
+
+      <div class="metric-grid">
+        <article class="metric-card">
+          <h3>今月シフト日数</h3>
+          <p id="metricShiftDays" class="metric-value">-</p>
+        </article>
+        <article class="metric-card">
+          <h3>交通費合計</h3>
+          <p id="metricTrafficTotal" class="metric-value">-</p>
+        </article>
+        <article class="metric-card">
+          <h3>経費合計</h3>
+          <p id="metricExpenseTotal" class="metric-value">-</p>
+        </article>
+        <article class="metric-card">
+          <h3>未提出交通</h3>
+          <p id="metricUnsubmittedTraffic" class="metric-value">-</p>
+        </article>
+        <article class="metric-card">
+          <h3>ホテル未回答</h3>
+          <p id="metricHotelUnanswered" class="metric-value">-</p>
+        </article>
+        <article class="metric-card">
+          <h3>ホテル確定</h3>
+          <p id="metricHotelConfirmed" class="metric-value">-</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="screenTraffic" class="card screen">
+      <h2>交通費申請（手打ち）</h2>
+      <form id="manualForm" class="form-grid">
+        <label>勤務日
+          <input id="manualWorkDate" type="date" required />
+        </label>
+        <label>出発駅
+          <input id="manualFromStation" type="text" required />
+        </label>
+        <label>到着駅
+          <input id="manualToStation" type="text" required />
+        </label>
+        <label>金額
+          <input id="manualAmount" type="number" min="1" required />
+        </label>
+        <label>片道/往復
+          <select id="manualRoundTrip">
+            <option value="片道">片道</option>
+            <option value="往復">往復</option>
+          </select>
+        </label>
+        <label>プロジェクト
+          <input id="manualProject" type="text" />
+        </label>
+        <label>氏名
+          <input id="manualName" type="text" />
+        </label>
+        <label class="field-span-2">メモ
+          <input id="manualMemo" type="text" />
+        </label>
+        <button id="manualSubmit" type="submit">送信</button>
+      </form>
+    </section>
+
+    <section id="screenOcr" class="card screen">
+      <h2>OCR申請</h2>
+      <form id="ocrExtractForm" class="form-grid">
+        <label>画像
+          <input id="ocrImage" type="file" accept="image/*" required />
+        </label>
+        <label>勤務日
+          <input id="ocrWorkDate" type="date" required />
+        </label>
+        <label>プロジェクト
+          <input id="ocrProject" type="text" />
+        </label>
+        <label>氏名
+          <input id="ocrName" type="text" />
+        </label>
+        <button id="ocrExtractButton" type="submit">OCR実行</button>
+      </form>
+
+      <h3>抽出ドラフト</h3>
+      <form id="ocrDraftForm" class="form-grid">
+        <label>userId
+          <input id="draftUserId" type="text" required />
+        </label>
+        <label>氏名
+          <input id="draftName" type="text" />
+        </label>
+        <label>プロジェクト
+          <input id="draftProject" type="text" />
+        </label>
+        <label>勤務日
+          <input id="draftWorkDate" type="date" required />
+        </label>
+        <label>出発駅
+          <input id="draftFromStation" type="text" required />
+        </label>
+        <label>到着駅
+          <input id="draftToStation" type="text" required />
+        </label>
+        <label>金額
+          <input id="draftAmount" type="number" min="1" required />
+        </label>
+        <label>片道/往復
+          <select id="draftRoundTrip">
+            <option value="片道">片道</option>
+            <option value="往復">往復</option>
+          </select>
+        </label>
+        <label class="field-span-2">メモ
+          <input id="draftMemo" type="text" />
+        </label>
+        <button id="ocrSubmitButton" type="submit">ドラフト送信</button>
+      </form>
+    </section>
+
+    <section id="screenExpense" class="card screen">
+      <h2>立替経費申請</h2>
+      <form id="expenseForm" class="form-grid">
+        <label>利用日
+          <input id="expenseWorkDate" type="date" required />
+        </label>
+        <label>カテゴリ
+          <input id="expenseCategory" type="text" placeholder="例: 備品 / 会議費" required />
+        </label>
+        <label>金額
+          <input id="expenseAmount" type="number" min="1" required />
+        </label>
+        <label>支払方法
+          <select id="expensePaymentMethod">
+            <option value="advance">立替</option>
+            <option value="corporate">法人カード</option>
+            <option value="cash">現金</option>
+          </select>
+        </label>
+        <label>プロジェクト
+          <input id="expenseProject" type="text" />
+        </label>
+        <label>氏名
+          <input id="expenseName" type="text" />
+        </label>
+        <label class="field-span-2">内容
+          <input id="expenseMemo" type="text" required />
+        </label>
+        <button id="expenseSubmitButton" type="submit">経費送信</button>
+      </form>
+    </section>
+
+    <section id="screenHotel" class="card screen">
+      <div class="section-head">
+        <h2>ホテル回答状況</h2>
+        <button id="hotelRefreshButton" type="button">再取得</button>
+      </div>
+
+      <div class="status-grid">
+        <article>
+          <h3>回答済み日</h3>
+          <ul id="hotelAnsweredDates" class="plain-list"></ul>
+        </article>
+        <article>
+          <h3>未回答日</h3>
+          <ul id="hotelUnansweredDates" class="plain-list"></ul>
+        </article>
+      </div>
+      <p class="hint">画像によるホテル確定は、管理者が LINE へ画像投稿した際にWebhookで自動処理されます。</p>
+    </section>
+
+    <section id="screenMonthly" class="card screen">
+      <h2>月次ファイル生成（管理者）</h2>
+      <form id="monthlyForm" class="form-grid">
+        <label>対象月
+          <input id="monthlyMonth" type="month" required />
+        </label>
+        <label class="field-span-2">出力
+          <input id="monthlyResultUrl" type="url" readonly placeholder="生成後にURLが表示されます" />
+        </label>
+        <button id="monthlyExportButton" type="submit">月次ファイル生成</button>
+      </form>
+    </section>
+
+    <section class="card response-card">
+      <h2>Response JSON</h2>
+      <pre id="responseJson">{}</pre>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

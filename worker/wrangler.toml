@@ -1,0 +1,29 @@
+name = "traffic-worker-v0"
+main = "src/index.js"
+compatibility_date = "2026-02-19"
+workers_dev = true
+
+[vars]
+ALLOWED_ORIGINS = "https://traffic-worker-v0.kaitomoga0316.workers.dev,https://liff.line.me"
+IDEMPOTENCY_TTL_SECONDS = "86400"
+WEBHOOK_EVENT_TTL_SECONDS = "86400"
+ADMIN_ALLOWED_IPS = ""
+LIFF_REGISTER_URL = ""
+LINE_RICHMENU_ID_UNREGISTERED = ""
+LINE_RICHMENU_ID_REGISTERED = ""
+
+[triggers]
+crons = ["0 1 * * *"]
+
+[[kv_namespaces]]
+binding = "IDEMPOTENCY_KV"
+id = "36c930ac6ddb4676a648a997a71945fa"
+preview_id = "8f69a945fcc6486e871c150a923dde47"
+
+[[durable_objects.bindings]]
+name = "IDEMPOTENCY_LOCK"
+class_name = "IdempotencyLockDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["IdempotencyLockDurableObject"]
