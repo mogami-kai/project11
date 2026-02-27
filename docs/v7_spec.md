@@ -93,7 +93,9 @@ COREテーブル:
 - `AUDIT_LOG`
 - `SETTINGS`
 
-## 6. Slack Security and Role Gate
+## 6. Security & Ops
+
+### 6.1 Slack Security and Role Gate
 
 - 署名: `x-slack-signature`, `x-slack-request-timestamp` を必須検証
 - ロール: ROLE_BINDINGS の `ADMIN/APPROVER/VIEWER`
@@ -104,6 +106,10 @@ COREテーブル:
 - Slack retry / 二重クリック対策:
   - Worker idempotency key
   - GAS operationId + state/CAS 判定
+
+### 6.2 Security & Ops (Addendum)
+
+- 追記用セクション（既存契約の意味変更なしで加筆する）
 
 ## 7. State Rules (v7 Additions)
 

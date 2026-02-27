@@ -114,46 +114,70 @@ function doPost(e) {
     }
     const ss = SpreadsheetApp.openById(cfg.values.SPREADSHEET_ID);
     switch (req.action) {
-      case 'expense.create':            return handleExpenseCreate_(ss, req.data, requestId);
-      case 'hotel.screenshot.process':  return handleHotelScreenshotProcess_(ss, req.data, requestId);
-      case 'traffic.create':        return handleTrafficCreate_(ss, req.data, requestId);
-      case 'traffic.setPair':       return handleTrafficSetPair_(ss, req.data, requestId);
-      case 'status.get':            return handleStatusGet_(ss, req.data, requestId);
-      case 'dashboard.staff.snapshot': return handleDashboardStaffSnapshot_(ss, req.data, requestId);
-      case 'monthly.file.generate': return handleMonthlyFileGenerate_(ss, req.data, requestId);
-      case 'site.getByDate':        return handleSiteGetByDate_(ss, req.data, requestId);
-      case 'site.profile.get':      return handleSiteProfileGet_(ss, req.data, requestId);
-      case 'unsubmitted.list':      return handleUnsubmittedList_(ss, req.data, requestId);
-      case 'hotel.intent.submit':   return handleHotelIntentSubmit_(ss, req.data, requestId);
-      case 'hotel.intent.list':     return handleHotelIntentList_(ss, req.data, requestId);
-      case 'hotel.intent.summary':  return handleHotelIntentSummary_(ss, req.data, requestId);
-      case 'hotel.intent.targets':  return handleHotelIntentTargets_(ss, req.data, requestId);
-      case 'hotel.user.upsert':     return handleHotelUserUpsert_(ss, req.data, requestId);
-      case 'reminder.targets':      return handleReminderTargets_(ss, req.data, requestId);
-      case 'hotel.sendGuard':       return handleHotelSendGuard_(ss, req.data, requestId);
-      case 'reminder.sendGuard':    return handleReminderSendGuard_(ss, req.data, requestId);
-      case 'ops.log':               return handleOpsLog_(ss, req.data, requestId);
-      case 'staff.register.lock':   return handleStaffRegisterLock_(ss, req.data, requestId);
-      case 'staff.register.status': return handleStaffRegisterStatus_(ss, req.data, requestId);
-      case 'staff.register.upsert': return handleStaffRegisterUpsert_(ss, req.data, requestId);
-      case 'shift.raw.ingest':      return handleShiftRawIngest_(ss, req.data, requestId);
-      case 'shift.raw.recent':      return handleShiftRawRecent_(ss, req.data, requestId);
-      case 'shift.parse.run':       return handleShiftParseRun_(ss, req.data, requestId);
-      case 'shift.parse.stats':     return handleShiftParseStats_(ss, requestId);
-      case 'my.week.assignments':   return handleMyWeekAssignments_(ss, req.data, requestId);
-      case 'admin.role.resolve':    return handleAdminRoleResolve_(ss, req.data, requestId);
-      case 'admin.broadcast.preview': return handleAdminBroadcastPreview_(ss, req.data, requestId);
-      case 'admin.broadcast.send.prepare': return handleAdminBroadcastSendPrepare_(ss, req.data, requestId);
-      case 'admin.broadcast.send.finalize': return handleAdminBroadcastSendFinalize_(ss, req.data, requestId);
-      case 'admin.broadcast.retryFailed.prepare': return handleAdminBroadcastRetryFailedPrepare_(ss, req.data, requestId);
-      case 'admin.broadcast.retryFailed.finalize': return handleAdminBroadcastRetryFailedFinalize_(ss, req.data, requestId);
-      case 'admin.approval.pending': return handleAdminApprovalPending_(ss, req.data, requestId);
-      case 'admin.approval.decide': return handleAdminApprovalDecide_(ss, req.data, requestId);
-      case 'admin.monthly.close.export': return handleAdminMonthlyCloseExport_(ss, req.data, requestId);
-      case 'admin.hotel.summary': return handleAdminHotelSummary_(ss, req.data, requestId);
-      case 'admin.audit.lookup': return handleAdminAuditLookup_(ss, req.data, requestId);
+      // expense
+      case 'expense.create':
+        return dispatchExpenseAction_(req.action, ss, req.data, requestId);
+
+      // hotel / reminder
+      case 'hotel.screenshot.process':
+      case 'hotel.intent.submit':
+      case 'hotel.intent.list':
+      case 'hotel.intent.summary':
+      case 'hotel.intent.targets':
+      case 'hotel.user.upsert':
+      case 'hotel.sendGuard':
+      case 'reminder.targets':
+      case 'reminder.sendGuard':
+        return dispatchHotelAction_(req.action, ss, req.data, requestId);
+
+      // traffic
+      case 'traffic.create':
+      case 'traffic.setPair':
+        return dispatchTrafficAction_(req.action, ss, req.data, requestId);
+
+      // staff
+      case 'staff.register.lock':
+      case 'staff.register.status':
+      case 'staff.register.upsert':
+        return dispatchStaffAction_(req.action, ss, req.data, requestId);
+
+      // shift
+      case 'shift.raw.ingest':
+      case 'shift.raw.recent':
+      case 'shift.parse.run':
+      case 'shift.parse.stats':
+      case 'my.week.assignments':
+        return dispatchShiftAction_(req.action, ss, req.data, requestId);
+
+      // ops
+      case 'status.get':
+      case 'dashboard.staff.snapshot':
+      case 'site.getByDate':
+      case 'site.profile.get':
+      case 'unsubmitted.list':
+      case 'ops.log':
+        return dispatchOpsAction_(req.action, ss, req.data, requestId);
+
+      // monthly
+      case 'monthly.file.generate':
+        return dispatchMonthlyAction_(req.action, ss, req.data, requestId);
+
+      // admin
+      case 'admin.role.resolve':
+      case 'admin.broadcast.preview':
+      case 'admin.broadcast.send.prepare':
+      case 'admin.broadcast.send.finalize':
+      case 'admin.broadcast.retryFailed.prepare':
+      case 'admin.broadcast.retryFailed.finalize':
+      case 'admin.approval.pending':
+      case 'admin.approval.decide':
+      case 'admin.monthly.close.export':
+      case 'admin.hotel.summary':
+      case 'admin.audit.lookup':
+        return dispatchAdminAction_(req.action, ss, req.data, requestId);
+
       default:
-        return errorResponse_('E_UNSUPPORTED_ACTION', 'Unsupported action.', { action: req.action }, requestId);
+        return unsupportedActionResponse_(req.action, requestId);
     }
   } catch (errTop) {
     // [P8] requestId が確定済みならそれを使う
@@ -164,6 +188,142 @@ function doPost(e) {
       requestId,
       true
     );
+  }
+}
+
+function unsupportedActionResponse_(action, requestId) {
+  return errorResponse_('E_UNSUPPORTED_ACTION', 'Unsupported action.', { action: action }, requestId);
+}
+
+function dispatchExpenseAction_(action, ss, data, requestId) {
+  switch (action) {
+    case 'expense.create':
+      return handleExpenseCreate_(ss, data, requestId);
+    default:
+      return unsupportedActionResponse_(action, requestId);
+  }
+}
+
+function dispatchHotelAction_(action, ss, data, requestId) {
+  switch (action) {
+    case 'hotel.screenshot.process':
+      return handleHotelScreenshotProcess_(ss, data, requestId);
+    case 'hotel.intent.submit':
+      return handleHotelIntentSubmit_(ss, data, requestId);
+    case 'hotel.intent.list':
+      return handleHotelIntentList_(ss, data, requestId);
+    case 'hotel.intent.summary':
+      return handleHotelIntentSummary_(ss, data, requestId);
+    case 'hotel.intent.targets':
+      return handleHotelIntentTargets_(ss, data, requestId);
+    case 'hotel.user.upsert':
+      return handleHotelUserUpsert_(ss, data, requestId);
+    case 'hotel.sendGuard':
+      return handleHotelSendGuard_(ss, data, requestId);
+    case 'reminder.targets':
+      return handleReminderTargets_(ss, data, requestId);
+    case 'reminder.sendGuard':
+      return handleReminderSendGuard_(ss, data, requestId);
+    default:
+      return unsupportedActionResponse_(action, requestId);
+  }
+}
+
+function dispatchTrafficAction_(action, ss, data, requestId) {
+  switch (action) {
+    case 'traffic.create':
+      return handleTrafficCreate_(ss, data, requestId);
+    case 'traffic.setPair':
+      return handleTrafficSetPair_(ss, data, requestId);
+    default:
+      return unsupportedActionResponse_(action, requestId);
+  }
+}
+
+function dispatchStaffAction_(action, ss, data, requestId) {
+  switch (action) {
+    case 'staff.register.lock':
+      return handleStaffRegisterLock_(ss, data, requestId);
+    case 'staff.register.status':
+      return handleStaffRegisterStatus_(ss, data, requestId);
+    case 'staff.register.upsert':
+      return handleStaffRegisterUpsert_(ss, data, requestId);
+    default:
+      return unsupportedActionResponse_(action, requestId);
+  }
+}
+
+function dispatchShiftAction_(action, ss, data, requestId) {
+  switch (action) {
+    case 'shift.raw.ingest':
+      return handleShiftRawIngest_(ss, data, requestId);
+    case 'shift.raw.recent':
+      return handleShiftRawRecent_(ss, data, requestId);
+    case 'shift.parse.run':
+      return handleShiftParseRun_(ss, data, requestId);
+    case 'shift.parse.stats':
+      return handleShiftParseStats_(ss, requestId);
+    case 'my.week.assignments':
+      return handleMyWeekAssignments_(ss, data, requestId);
+    default:
+      return unsupportedActionResponse_(action, requestId);
+  }
+}
+
+function dispatchOpsAction_(action, ss, data, requestId) {
+  switch (action) {
+    case 'status.get':
+      return handleStatusGet_(ss, data, requestId);
+    case 'dashboard.staff.snapshot':
+      return handleDashboardStaffSnapshot_(ss, data, requestId);
+    case 'site.getByDate':
+      return handleSiteGetByDate_(ss, data, requestId);
+    case 'site.profile.get':
+      return handleSiteProfileGet_(ss, data, requestId);
+    case 'unsubmitted.list':
+      return handleUnsubmittedList_(ss, data, requestId);
+    case 'ops.log':
+      return handleOpsLog_(ss, data, requestId);
+    default:
+      return unsupportedActionResponse_(action, requestId);
+  }
+}
+
+function dispatchMonthlyAction_(action, ss, data, requestId) {
+  switch (action) {
+    case 'monthly.file.generate':
+      return handleMonthlyFileGenerate_(ss, data, requestId);
+    default:
+      return unsupportedActionResponse_(action, requestId);
+  }
+}
+
+function dispatchAdminAction_(action, ss, data, requestId) {
+  switch (action) {
+    case 'admin.role.resolve':
+      return handleAdminRoleResolve_(ss, data, requestId);
+    case 'admin.broadcast.preview':
+      return handleAdminBroadcastPreview_(ss, data, requestId);
+    case 'admin.broadcast.send.prepare':
+      return handleAdminBroadcastSendPrepare_(ss, data, requestId);
+    case 'admin.broadcast.send.finalize':
+      return handleAdminBroadcastSendFinalize_(ss, data, requestId);
+    case 'admin.broadcast.retryFailed.prepare':
+      return handleAdminBroadcastRetryFailedPrepare_(ss, data, requestId);
+    case 'admin.broadcast.retryFailed.finalize':
+      return handleAdminBroadcastRetryFailedFinalize_(ss, data, requestId);
+    case 'admin.approval.pending':
+      return handleAdminApprovalPending_(ss, data, requestId);
+    case 'admin.approval.decide':
+      return handleAdminApprovalDecide_(ss, data, requestId);
+    case 'admin.monthly.close.export':
+      return handleAdminMonthlyCloseExport_(ss, data, requestId);
+    case 'admin.hotel.summary':
+      return handleAdminHotelSummary_(ss, data, requestId);
+    case 'admin.audit.lookup':
+      return handleAdminAuditLookup_(ss, data, requestId);
+    default:
+      return unsupportedActionResponse_(action, requestId);
   }
 }
 
@@ -5783,70 +5943,47 @@ function appendAuditLog_(ss, input) {
   ]);
 }
 
-function ensureRoleBindingsSheet_(ss) {
-  let sheet = ss.getSheetByName(SHEET_ROLE_BINDINGS_);
-  if (!sheet) sheet = ss.insertSheet(SHEET_ROLE_BINDINGS_);
-  ensureHeaderRowIfEmpty_(sheet, ['bindingId', 'slackUserId', 'lineUserId', 'email', 'role', 'isActive', 'updatedAt', 'updatedBy']);
-  ensureHeaderColumnsExist_(sheet, ['bindingId', 'slackUserId', 'lineUserId', 'email', 'role', 'isActive', 'updatedAt', 'updatedBy']);
+function ensureNamedSheetWithHeaders_(ss, sheetName, headers) {
+  const name = sanitizeString_(sheetName);
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) sheet = ss.insertSheet(name);
+  ensureHeaderRowIfEmpty_(sheet, headers);
+  ensureHeaderColumnsExist_(sheet, headers);
   return sheet;
+}
+
+function ensureMonthlyPartitionSheet_(ss, sheetPrefix, month, headers) {
+  const normalized = sanitizeString_(month).replace('-', '_');
+  const name = sanitizeString_(sheetPrefix) + normalized;
+  return ensureNamedSheetWithHeaders_(ss, name, headers);
+}
+
+function ensureRoleBindingsSheet_(ss) {
+  return ensureSheetByCanonical_(ss, 'ROLE_BINDINGS');
 }
 
 function ensureAuditLogSheet_(ss) {
-  let sheet = ss.getSheetByName(SHEET_AUDIT_LOG_);
-  if (!sheet) sheet = ss.insertSheet(SHEET_AUDIT_LOG_);
-  ensureHeaderRowIfEmpty_(sheet, ['auditId', 'timestamp', 'actorType', 'actorId', 'actorRole', 'action', 'operationId', 'targetType', 'targetId', 'fromState', 'toState', 'detailsJson', 'requestId']);
-  ensureHeaderColumnsExist_(sheet, ['auditId', 'timestamp', 'actorType', 'actorId', 'actorRole', 'action', 'operationId', 'targetType', 'targetId', 'fromState', 'toState', 'detailsJson', 'requestId']);
-  return sheet;
+  return ensureSheetByCanonical_(ss, 'AUDIT_LOG');
 }
 
 function ensureWeekAssignmentsMonthSheet_(ss, month) {
-  const normalized = sanitizeString_(month).replace('-', '_');
-  const name = SHEET_WEEK_ASSIGNMENTS_PREFIX_ + normalized;
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) sheet = ss.insertSheet(name);
-  ensureHeaderRowIfEmpty_(sheet, ['assignmentId', 'broadcastId', 'operationId', 'weekId', 'targetMonth', 'workDate', 'siteId', 'siteName', 'siteRaw', 'role', 'userId', 'lineUserId', 'staffNameRaw', 'dateRangeFrom', 'dateRangeTo', 'openChatUrl', 'status', 'createdAt', 'updatedAt', 'requestId']);
-  ensureHeaderColumnsExist_(sheet, ['assignmentId', 'broadcastId', 'operationId', 'weekId', 'targetMonth', 'workDate', 'siteId', 'siteName', 'siteRaw', 'role', 'userId', 'lineUserId', 'staffNameRaw', 'dateRangeFrom', 'dateRangeTo', 'openChatUrl', 'status', 'createdAt', 'updatedAt', 'requestId']);
-  return sheet;
+  return ensureMonthlyPartitionSheet_(ss, SHEET_WEEK_ASSIGNMENTS_PREFIX_, month, ['assignmentId', 'broadcastId', 'operationId', 'weekId', 'targetMonth', 'workDate', 'siteId', 'siteName', 'siteRaw', 'role', 'userId', 'lineUserId', 'staffNameRaw', 'dateRangeFrom', 'dateRangeTo', 'openChatUrl', 'status', 'createdAt', 'updatedAt', 'requestId']);
 }
 
 function ensureBroadcastLogMonthSheet_(ss, month) {
-  const normalized = sanitizeString_(month).replace('-', '_');
-  const name = SHEET_BROADCAST_LOG_PREFIX_ + normalized;
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) sheet = ss.insertSheet(name);
-  ensureHeaderRowIfEmpty_(sheet, ['broadcastId', 'operationId', 'weekId', 'targetMonth', 'status', 'preparedAt', 'sentAt', 'sentCount', 'failedCount', 'skippedCount', 'totalRecipients', 'missingStaffJson', 'missingSiteMasterJson', 'missingOpenChatJson', 'unmatchedNamesJson', 'previewJson', 'rawText', 'requestId', 'updatedAt']);
-  ensureHeaderColumnsExist_(sheet, ['broadcastId', 'operationId', 'weekId', 'targetMonth', 'status', 'preparedAt', 'sentAt', 'sentCount', 'failedCount', 'skippedCount', 'totalRecipients', 'missingStaffJson', 'missingSiteMasterJson', 'missingOpenChatJson', 'unmatchedNamesJson', 'previewJson', 'rawText', 'requestId', 'updatedAt']);
-  return sheet;
+  return ensureMonthlyPartitionSheet_(ss, SHEET_BROADCAST_LOG_PREFIX_, month, ['broadcastId', 'operationId', 'weekId', 'targetMonth', 'status', 'preparedAt', 'sentAt', 'sentCount', 'failedCount', 'skippedCount', 'totalRecipients', 'missingStaffJson', 'missingSiteMasterJson', 'missingOpenChatJson', 'unmatchedNamesJson', 'previewJson', 'rawText', 'requestId', 'updatedAt']);
 }
 
 function ensureFailedJobsMonthSheet_(ss, month) {
-  const normalized = sanitizeString_(month).replace('-', '_');
-  const name = SHEET_FAILED_JOBS_PREFIX_ + normalized;
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) sheet = ss.insertSheet(name);
-  ensureHeaderRowIfEmpty_(sheet, ['failedJobId', 'broadcastId', 'operationId', 'jobType', 'userId', 'lineUserId', 'siteId', 'role', 'workDate', 'errorCode', 'errorMessage', 'payloadJson', 'status', 'retryCount', 'createdAt', 'updatedAt', 'requestId']);
-  ensureHeaderColumnsExist_(sheet, ['failedJobId', 'broadcastId', 'operationId', 'jobType', 'userId', 'lineUserId', 'siteId', 'role', 'workDate', 'errorCode', 'errorMessage', 'payloadJson', 'status', 'retryCount', 'createdAt', 'updatedAt', 'requestId']);
-  return sheet;
+  return ensureMonthlyPartitionSheet_(ss, SHEET_FAILED_JOBS_PREFIX_, month, ['failedJobId', 'broadcastId', 'operationId', 'jobType', 'userId', 'lineUserId', 'siteId', 'role', 'workDate', 'errorCode', 'errorMessage', 'payloadJson', 'status', 'retryCount', 'createdAt', 'updatedAt', 'requestId']);
 }
 
 function ensureApprovalQueueMonthSheet_(ss, month) {
-  const normalized = sanitizeString_(month).replace('-', '_');
-  const name = SHEET_APPROVAL_QUEUE_PREFIX_ + normalized;
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) sheet = ss.insertSheet(name);
-  ensureHeaderRowIfEmpty_(sheet, ['approvalId', 'kind', 'targetId', 'status', 'requestedBy', 'reason', 'createdAt', 'decidedAt', 'decidedBy', 'decisionReason', 'updatedAt', 'requestId']);
-  ensureHeaderColumnsExist_(sheet, ['approvalId', 'kind', 'targetId', 'status', 'requestedBy', 'reason', 'createdAt', 'decidedAt', 'decidedBy', 'decisionReason', 'updatedAt', 'requestId']);
-  return sheet;
+  return ensureMonthlyPartitionSheet_(ss, SHEET_APPROVAL_QUEUE_PREFIX_, month, ['approvalId', 'kind', 'targetId', 'status', 'requestedBy', 'reason', 'createdAt', 'decidedAt', 'decidedBy', 'decisionReason', 'updatedAt', 'requestId']);
 }
 
 function ensureMonthlyLockSheet_(ss, month) {
-  const normalized = sanitizeString_(month).replace('-', '_');
-  const name = SHEET_MONTHLY_LOCK_PREFIX_ + normalized;
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) sheet = ss.insertSheet(name);
-  ensureHeaderRowIfEmpty_(sheet, ['month', 'status', 'lockedAt', 'lockedBy', 'exportFileId', 'exportFileUrl', 'requestId', 'updatedAt']);
-  ensureHeaderColumnsExist_(sheet, ['month', 'status', 'lockedAt', 'lockedBy', 'exportFileId', 'exportFileUrl', 'requestId', 'updatedAt']);
-  return sheet;
+  return ensureMonthlyPartitionSheet_(ss, SHEET_MONTHLY_LOCK_PREFIX_, month, ['month', 'status', 'lockedAt', 'lockedBy', 'exportFileId', 'exportFileUrl', 'requestId', 'updatedAt']);
 }
 
 function parseActionResponsePayload_(output) {
