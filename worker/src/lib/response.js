@@ -54,7 +54,7 @@ export function withCorsHeaders(response, origin, allowedOrigin, requestId = '')
   headers.set('access-control-allow-methods', 'POST, OPTIONS, GET');
   headers.set(
     'access-control-allow-headers',
-    'Authorization, Content-Type, x-api-key, x-idempotency-key, x-request-id'
+    'Authorization, Content-Type, x-api-key, x-idempotency-key, x-request-id, x-slack-signature, x-slack-request-timestamp, x-slack-action-ts, x-slack-user-id'
   );
   headers.set('access-control-max-age', '86400');
   if (requestId) {

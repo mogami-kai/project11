@@ -1,6 +1,7 @@
 import { parseAllowedOrigins, validateEnvForRequest, validateEnvForScheduled } from './lib/env.js';
-import { buildError, createMeta, createResponder } from './http/response.js';
+import { buildError, createMeta, createResponder } from './lib/response.js';
 import { handleAdminShiftRawRecent, handleDebugAuth, handleDebugEnv, handleDebugFingerprint, handleDebugGas, handleDebugLineBotInfo, handleDebugRoutes } from './handlers/admin.js';
+import { handleAdminBroadcastPreview, handleAdminBroadcastRetryFailed, handleAdminBroadcastSend } from './handlers/broadcast.js';
 import { handleDashboardMonth } from './handlers/dashboard.js';
 import { handleExpenseCreate } from './handlers/expense.js';
 import { handleHotelPush } from './handlers/hotel.js';
@@ -11,14 +12,16 @@ import { handleOcrExtract } from './handlers/ocr.js';
 import { handleRegisterUpsert } from './handlers/register.js';
 import { handleReminderPush, runScheduledReminder } from './handlers/reminder.js';
 import { handleShiftParseRun, handleShiftParseStats, handleShiftRawIngest } from './handlers/shift.js';
+import { handleSlackCommand, handleSlackEvents, handleSlackInteractive } from './handlers/slack.js';
 import { handleRegisterStatus, handleStatusGet, handleUnsubmittedList } from './handlers/status.js';
 import { handleTrafficCreate } from './handlers/traffic.js';
 import { handleTrafficOcrAuto } from './handlers/trafficPair.js';
 import { handleLineWebhook } from './handlers/webhook.js';
+import { handleMyWeekAssignments } from './handlers/my.js';
 import { htmlNoStoreResponse, getAllowedOrigin, normalizePath } from './util/http.js';
-import { redactHeaders, safeLog } from './util/redact.js';
+import { redactHeaders, safeLog } from './lib/redact.js';
 import { ymdJstFromEpoch } from './util/time.js';
-import { sanitizeRequestId } from './util/validate.js';
+import { sanitizeRequestId } from './lib/validate.js';
 
 const ROUTE_METHODS = new Map([
   ['/api/health', ['GET']],
@@ -27,6 +30,7 @@ const ROUTE_METHODS = new Map([
   ['/api/register/status', ['GET']],
   ['/api/register/upsert', ['POST']],
   ['/api/unsubmitted', ['GET']],
+  ['/api/my/week/assignments', ['GET']],
   ['/api/traffic/create', ['POST']],
   ['/api/expense/create', ['POST']],
   ['/api/traffic/ocr-auto', ['POST']],
@@ -38,6 +42,12 @@ const ROUTE_METHODS = new Map([
   ['/api/shift/raw/ingest', ['POST']],
   ['/api/shift/parse/run', ['POST']],
   ['/api/shift/parse/stats', ['POST']],
+  ['/api/admin/broadcast/preview', ['POST']],
+  ['/api/admin/broadcast/send', ['POST']],
+  ['/api/admin/broadcast/retry-failed', ['POST']],
+  ['/api/slack/command', ['POST']],
+  ['/api/slack/events', ['POST']],
+  ['/api/slack/interactive', ['POST']],
   ['/api/_debug/env', ['GET']],
   ['/api/_debug/auth', ['GET']],
   ['/api/_debug/gas', ['GET']],
@@ -102,6 +112,8 @@ export async function routeFetch(request, env, ctx) {
         return responder.withCors(await handleStatusGet(request, env, meta, requestId, url));
       case 'GET /api/register/status':
         return responder.withCors(await handleRegisterStatus(request, env, meta, requestId, url));
+      case 'GET /api/my/week/assignments':
+        return responder.withCors(await handleMyWeekAssignments(request, env, meta, requestId, url));
       case 'POST /api/register/upsert':
         return responder.withCors(await handleRegisterUpsert(request, env, meta, requestId));
       case 'GET /api/unsubmitted':
@@ -128,6 +140,18 @@ export async function routeFetch(request, env, ctx) {
         return responder.withCors(await handleShiftParseRun(request, env, meta, requestId));
       case 'POST /api/shift/parse/stats':
         return responder.withCors(await handleShiftParseStats(request, env, meta, requestId));
+      case 'POST /api/admin/broadcast/preview':
+        return responder.withCors(await handleAdminBroadcastPreview(request, env, meta, requestId));
+      case 'POST /api/admin/broadcast/send':
+        return responder.withCors(await handleAdminBroadcastSend(request, env, meta, requestId));
+      case 'POST /api/admin/broadcast/retry-failed':
+        return responder.withCors(await handleAdminBroadcastRetryFailed(request, env, meta, requestId));
+      case 'POST /api/slack/command':
+        return responder.withCors(await handleSlackCommand(request, env, meta, requestId));
+      case 'POST /api/slack/events':
+        return responder.withCors(await handleSlackEvents(request, env, meta, requestId));
+      case 'POST /api/slack/interactive':
+        return responder.withCors(await handleSlackInteractive(request, env, meta, requestId));
       case 'GET /api/_debug/env':
         return responder.withCors(await handleDebugEnv(request, env, meta, origin, allowedOrigin));
       case 'GET /api/_debug/auth':

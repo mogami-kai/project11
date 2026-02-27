@@ -1,6 +1,8 @@
 import { fetchWithRetry } from '../lib/fetch.js';
-import { safeLog } from '../util/redact.js';
-import { sanitizeDateYmd } from '../util/validate.js';
+import { safeLog } from '../lib/redact.js';
+import { sanitizeDateYmd } from '../lib/validate.js';
+import { applyTransportRules, normalizeItemType } from '../lib/receiptRules.js';
+import { prepareImageForOcr } from '../lib/imagePrep.js';
 
 const OCR_TIMEOUT_MS = 18000;
 const DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash-8b';
@@ -80,20 +82,26 @@ async function generateWithGemini(env, payload, logLabel, requestId) {
 export async function extractReceiptWithGemini(env, input) {
   const prompt = [
     'あなたは交通費OCR専用抽出器です。出力はJSONのみ、説明文は禁止。',
-    '対象画像は「交通費検索結果」または「足場現場シフト画像（交代矢印あり）」です。',
-    '次のキー以外を絶対に出力しないこと。',
-    '{"fromCandidate":"","toCandidate":"","amount":0,"issuedAtCandidate":"","transportTypeCandidate":"","rawText":"","workDate":""}',
+    '対象画像は「交通費検索結果」「ICカード履歴」「領収書」「足場現場シフト画像（交代矢印あり）」です。',
+    '次のJSON形式のみ出力すること（他のキーは出力しない）:',
+    '{"items":[{"from":"","to":"","amount":0,"type":"train|bus|mixed|other|unknown","confidence":0.9,"rawLine":""}],"issuedAtCandidate":"","workDate":"","rawText":""}',
     '',
-    '抽出ルール:',
-    '- fromCandidate/toCandidate は交通文脈（運賃, 乗換, IC, 切符, 円, 経路, 発, 着）がある場合のみ抽出',
+    'itemsの抽出ルール（画像内の全明細行を配列で返す）:',
+    '- from/to は交通文脈（運賃, 乗換, IC, 切符, 円, 経路, 発, 着）がある行のみ抽出',
     '- 矢印記号（→, ⇒, ➡, ⇄, ↔, ->）は経路候補として参照する',
-    '- ただし人名/班名/職種の交代矢印（例: A班→B班, 職長→手元）は駅名として扱わない',
-    '- amount は支払額1件を整数円で返す（最終合計を優先）。不明は0',
-    '- issuedAtCandidate/workDate は YYYY-MM-DD もしくは YYYY-MM-DD HH:mm で返す。判別不能は空文字',
-    '- transportTypeCandidate は train|bus|mixed|unknown のいずれか',
-    '- rawText は判定に使った文字のみを150文字以内で返す',
+    '- 人名/班名/職種の交代矢印（例: A班→B班, 職長→手元）は駅名として扱わない',
+    '- amount は該当行の支払額（整数円）。不明は0',
+    '- type は train|bus|mixed|other|unknown のいずれか（other は物販・食事・宿泊等の非交通費）',
+    '- confidence は 0〜1（その行が交通費と確信できる度合い）',
+    '- rawLine は判定に使った文字（100文字以内）',
+    '- issuedAtCandidate/workDate は YYYY-MM-DD もしくは YYYY-MM-DD HH:mm。不明は空文字',
+    '- rawText は判定に使った文字のみを150文字以内',
     '- 推測で補完しない。不明は空文字または0'
   ].join('\n');
+
+  // Preprocess: EXIF rotation + resize to 1600px long-edge
+  // Falls back to original image if runtime Canvas APIs are unavailable.
+  const prep = await prepareImageForOcr(input.imageBase64, input.mimeType);
 
   const payload = {
     contents: [
@@ -103,8 +111,8 @@ export async function extractReceiptWithGemini(env, input) {
           { text: prompt },
           {
             inline_data: {
-              mime_type: input.mimeType,
-              data: input.imageBase64
+              mime_type: prep.mimeType,
+              data: prep.base64
             }
           }
         ]
@@ -118,6 +126,14 @@ export async function extractReceiptWithGemini(env, input) {
 
   const normalized = normalizeOcrExtractionResult(generated.data);
   return { ok: true, data: normalized };
+}
+
+/**
+ * Exported wrapper around normalizeOcrExtractionResult for unit testing.
+ * Consumers should use extractReceiptWithGemini; this is test-only.
+ */
+export function normalizeOcrExtraction(rawGeminiData) {
+  return normalizeOcrExtractionResult(rawGeminiData);
 }
 
 export async function extractHotelConfirmationWithGemini(env, input) {
@@ -225,34 +241,46 @@ export async function normalizeStationsWithGemini(env, input) {
 }
 
 function normalizeOcrExtractionResult(data) {
-  const fromCandidate = String(data?.fromCandidate || data?.fromStation || '').trim();
-  const toCandidate = String(data?.toCandidate || data?.toStation || '').trim();
   const issuedAtCandidate = String(data?.issuedAtCandidate || data?.issuedAt || '').trim();
   const rawText = String(data?.rawText || '').trim().slice(0, 150);
-  const transportTypeCandidate = normalizeTransportType(
-    String(data?.transportTypeCandidate || data?.transportType || '').trim()
-  );
 
-  const result = {
+  // New items[] path: Gemini returns items array
+  const { items, totals } = applyTransportRules(data?.items);
+
+  // Primary item (first transport item with route info) drives backward-compat fields
+  const primary = items.find((it) => it.from || it.to) || items[0] || null;
+
+  // Backward-compat: if no items[], fall back to old flat fields for safe migration
+  const fromCandidate = primary
+    ? String(primary.from || '').trim()
+    : String(data?.fromCandidate || data?.fromStation || '').trim();
+  const toCandidate = primary
+    ? String(primary.to || '').trim()
+    : String(data?.toCandidate || data?.toStation || '').trim();
+  const amount = primary
+    ? Number(primary.amount || 0)
+    : Math.max(0, Number(data?.amount || 0));
+  const transportTypeCandidate = primary
+    ? normalizeItemType(String(primary.type || ''))
+    : normalizeTransportType(String(data?.transportTypeCandidate || data?.transportType || '').trim());
+
+  return {
+    // New structured fields
+    items,
+    totals,
+    // Backward-compatible flat fields (consumed by trafficPair.js, ocr.js)
     fromCandidate,
     toCandidate,
-    amount: Number(data?.amount || 0),
+    amount: Number.isFinite(amount) && amount >= 0 ? amount : 0,
     issuedAtCandidate,
     transportTypeCandidate,
     rawText,
-    // backward-compatible aliases for existing LIFF consumer
     workDate: sanitizeDateYmd(data?.workDate) || '',
     fromStation: fromCandidate,
     toStation: toCandidate,
     roundTrip: '片道',
     memo: ''
   };
-
-  if (!Number.isFinite(result.amount) || result.amount < 0) {
-    result.amount = 0;
-  }
-
-  return result;
 }
 
 function normalizeTransportType(value) {

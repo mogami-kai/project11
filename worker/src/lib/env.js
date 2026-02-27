@@ -4,6 +4,7 @@ const GAS_REQUIRED_PATHS = new Set([
   '/api/register/status',
   '/api/register/upsert',
   '/api/unsubmitted',
+  '/api/my/week/assignments',
   '/api/traffic/create',
   '/api/expense/create',
   '/api/traffic/ocr-auto',
@@ -12,6 +13,11 @@ const GAS_REQUIRED_PATHS = new Set([
   '/api/shift/raw/ingest',
   '/api/shift/parse/run',
   '/api/shift/parse/stats',
+  '/api/admin/broadcast/preview',
+  '/api/admin/broadcast/send',
+  '/api/admin/broadcast/retry-failed',
+  '/api/slack/command',
+  '/api/slack/interactive',
   '/api/admin/shift/raw/recent',
   '/api/_debug/gas'
 ]);
@@ -28,6 +34,17 @@ const ROUTE_ENV_REQUIREMENTS = [
   {
     match: (path) => path === '/api/hotel/push' || path === '/api/reminder/push',
     required: ['LINE_CHANNEL_ACCESS_TOKEN']
+  },
+  {
+    match: (path) =>
+      path === '/api/admin/broadcast/send' ||
+      path === '/api/admin/broadcast/retry-failed' ||
+      path === '/api/slack/interactive',
+    required: ['LINE_CHANNEL_ACCESS_TOKEN']
+  },
+  {
+    match: (path) => path === '/api/slack/command' || path === '/api/slack/events' || path === '/api/slack/interactive',
+    required: ['SLACK_SIGNING_SECRET']
   }
 ];
 

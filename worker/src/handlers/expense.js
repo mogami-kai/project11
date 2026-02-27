@@ -10,10 +10,10 @@ import {
 } from '../lib/idempotency.js';
 import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
-import { buildError, fail, json } from '../http/response.js';
+import { buildError, fail, json } from '../lib/response.js';
 import { requireRegistered } from '../lib/access.js';
 import { processAndStoreReceipt } from '../lib/receipt.js';
-import { sanitizeDateYmd, sanitizeRequestId, sanitizeUserId } from '../util/validate.js';
+import { sanitizeDateYmd, sanitizeRequestId, sanitizeUserId } from '../lib/validate.js';
 
 export async function handleExpenseCreate(request, env, meta, requestId) {
   const auth = await authenticateRequest(request, env, meta, {

@@ -1,4 +1,4 @@
-import { buildError } from '../http/response.js';
+import { buildError } from './response.js';
 
 const RECEIPT_MAX_EDGE_PX = 1200;
 const RECEIPT_JPEG_QUALITY = 0.7;

@@ -1,11 +1,11 @@
 import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
 import { fetchLineBotInfo, mapLineErrorCode } from '../clients/line.js';
-import { buildError, fail, json, ok } from '../http/response.js';
+import { buildError, fail, json, ok } from '../lib/response.js';
 import { parseAllowedOrigins } from '../lib/env.js';
 import { sha256Hex, stableStringify } from '../util/hash.js';
-import { sanitizeMonth, sanitizeUserId } from '../util/validate.js';
-import { safeLog } from '../util/redact.js';
+import { sanitizeMonth, sanitizeUserId } from '../lib/validate.js';
+import { safeLog } from '../lib/redact.js';
 
 export async function handleDebugEnv(request, env, meta, origin, allowedOrigin) {
   const auth = await authenticateRequest(request, env, meta, {

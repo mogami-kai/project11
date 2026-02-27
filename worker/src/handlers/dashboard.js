@@ -3,9 +3,9 @@
 // Worker は Sheets（EXPENSE_LOG / HOTEL_INTENT_LOG / HOTEL_CONFIRMED_LOG）に直接アクセスしない。
 import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
-import { buildError, fail, ok } from '../http/response.js';
+import { buildError, fail, ok } from '../lib/response.js';
 import { ymJstFromEpoch } from '../util/time.js';
-import { sanitizeMonth, sanitizeUserId } from '../util/validate.js';
+import { sanitizeMonth, sanitizeUserId } from '../lib/validate.js';
 
 export async function handleDashboardMonth(request, env, meta, requestId, url) {
   const auth = await authenticateRequest(request, env, meta, {

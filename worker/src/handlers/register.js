@@ -9,10 +9,10 @@ import {
 import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
 import { linkUserRichMenu, pushLineMessage } from '../clients/line.js';
-import { buildError, fail, json } from '../http/response.js';
-import { safeLog } from '../util/redact.js';
+import { buildError, fail, json } from '../lib/response.js';
+import { safeLog } from '../lib/redact.js';
 import { tryWriteOpsLogAlert } from '../util/ops.js';
-import { sanitizeRequestId, sanitizeUserId } from '../util/validate.js';
+import { sanitizeRequestId, sanitizeUserId } from '../lib/validate.js';
 
 export async function handleRegisterUpsert(request, env, meta, requestId) {
   const auth = await authenticateRequest(request, env, meta, {

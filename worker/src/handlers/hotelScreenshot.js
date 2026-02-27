@@ -14,8 +14,8 @@ import {
   resolvePayloadHash,
   setIdempotentResponse
 } from '../lib/idempotency.js';
-import { buildError, fail, json, ok } from '../http/response.js';
-import { sanitizeRequestId, sanitizeUserId } from '../util/validate.js';
+import { buildError, fail, json, ok } from '../lib/response.js';
+import { sanitizeRequestId, sanitizeUserId } from '../lib/validate.js';
 
 export async function handleHotelScreenshotProcess(request, env, meta, requestId) {
   const auth = await authenticateRequest(request, env, meta, {

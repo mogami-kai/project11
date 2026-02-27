@@ -190,10 +190,18 @@ export async function releaseLock(env, path, key) {
   memoryLocks.delete(lockKey);
 }
 
-export async function setIdempotentResponse(env, path, key, payload) {
+function resolveResponseTtlSeconds(env, ttlOverrideSeconds) {
+  const override = Number(ttlOverrideSeconds);
+  if (Number.isFinite(override) && override > 0) {
+    return Math.floor(override);
+  }
+  return parseTtlSeconds(env.IDEMPOTENCY_TTL_SECONDS, 86400);
+}
+
+export async function setIdempotentResponse(env, path, key, payload, options = {}) {
   if (!key) return;
 
-  const ttl = parseTtlSeconds(env.IDEMPOTENCY_TTL_SECONDS, 86400);
+  const ttl = resolveResponseTtlSeconds(env, options?.ttlSeconds);
   const storeKey = makeStoreKey(path, key);
   const kv = env.IDEMPOTENCY_KV;
 

@@ -1,8 +1,8 @@
 import { fetchWithRetry } from './lib/fetch.js';
-import { buildError, fail } from './http/response.js';
+import { buildError, fail } from './lib/response.js';
 import { sha256Hex } from './util/hash.js';
-import { safeLog } from './util/redact.js';
-import { sanitizeUserId, validateApiKeyAuth } from './util/validate.js';
+import { safeLog } from './lib/redact.js';
+import { sanitizeUserId, validateApiKeyAuth } from './lib/validate.js';
 
 const TOKEN_VERIFY_CACHE = new Map();
 

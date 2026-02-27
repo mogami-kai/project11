@@ -8,14 +8,14 @@ import {
 } from '../lib/idempotency.js';
 import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
-import { buildError, fail, json } from '../http/response.js';
+import { buildError, fail, json } from '../lib/response.js';
 import { requireRegistered } from '../lib/access.js';
 import {
   normalizeTrafficPayload,
   sanitizeRequestId,
   sanitizeUserId,
   validateTrafficPayload
-} from '../util/validate.js';
+} from '../lib/validate.js';
 
 function normalizeTrafficCreateInput(body) {
   if (!body || typeof body !== 'object') {

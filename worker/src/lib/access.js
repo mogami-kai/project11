@@ -1,5 +1,5 @@
 import { callGas } from '../clients/gas.js';
-import { buildError, fail } from '../http/response.js';
+import { buildError, fail } from './response.js';
 
 export const REQUIRED_REGISTRATION_FIELDS = [
   'nameKanji',

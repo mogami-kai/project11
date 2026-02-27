@@ -1,6 +1,6 @@
 import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
-import { buildError, fail, json } from '../http/response.js';
+import { buildError, fail, json } from '../lib/response.js';
 import { requireRegistered } from '../lib/access.js';
 import {
   acquireLock,
@@ -10,7 +10,7 @@ import {
   resolvePayloadHash,
   setIdempotentResponse
 } from '../lib/idempotency.js';
-import { sanitizeRequestId } from '../util/validate.js';
+import { sanitizeRequestId } from '../lib/validate.js';
 
 function resolveGasToken(env) {
   return String(env.STAFF_TOKEN_FOR_GAS || env.STAFF_TOKEN || '').trim();

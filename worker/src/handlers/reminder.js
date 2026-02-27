@@ -1,6 +1,6 @@
 import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
-import { buildError, fail, json } from '../http/response.js';
+import { buildError, fail, json } from '../lib/response.js';
 import { requireAdmin } from '../lib/access.js';
 import {
   acquireLock,
@@ -10,9 +10,9 @@ import {
   resolvePayloadHash,
   setIdempotentResponse
 } from '../lib/idempotency.js';
-import { safeLog } from '../util/redact.js';
+import { safeLog } from '../lib/redact.js';
 import { ymdJstFromEpoch } from '../util/time.js';
-import { sanitizeDateYmd, sanitizeRequestId, sanitizeUserId } from '../util/validate.js';
+import { sanitizeDateYmd, sanitizeRequestId, sanitizeUserId } from '../lib/validate.js';
 import { pushLineMessage } from '../clients/line.js';
 
 export async function handleReminderPush(request, env, meta, requestId) {

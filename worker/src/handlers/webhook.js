@@ -6,9 +6,9 @@ import {
   replyLineMessage,
   verifyLineWebhookSignature
 } from '../clients/line.js';
-import { buildError, createMeta, fail, ok, withCorsHeaders } from '../http/response.js';
+import { buildError, createMeta, fail, ok, withCorsHeaders } from '../lib/response.js';
 import { sha256Hex } from '../util/hash.js';
-import { safeLog } from '../util/redact.js';
+import { safeLog } from '../lib/redact.js';
 import { ymJstFromEpoch } from '../util/time.js';
 import { tryWriteOpsLogAlert } from '../util/ops.js';
 import { buildHelpMessage, buildMenuMessage, handleHotelPostbackEvent } from './hotel.js';

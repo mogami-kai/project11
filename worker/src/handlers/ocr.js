@@ -1,8 +1,8 @@
 import { authenticateRequest } from '../auth.js';
 import { getSiteProfile } from '../clients/gas.js';
 import { extractReceiptWithGemini, inferDirectionWithGemini } from '../clients/gemini.js';
-import { buildError, fail, ok } from '../http/response.js';
-import { sanitizeDateYmd, sanitizeUserId } from '../util/validate.js';
+import { buildError, fail, ok } from '../lib/response.js';
+import { sanitizeDateYmd, sanitizeUserId } from '../lib/validate.js';
 
 const EARLY_MORNING_ABSORB_MAX_HOUR = 4;
 
@@ -193,6 +193,8 @@ export async function handleOcrExtract(request, env, meta, requestId) {
       extracted,
       inferred,
       normalizedClaimDraft,
+      items: Array.isArray(extracted.items) ? extracted.items : [],
+      totals: extracted.totals || { train_total: 0, bus_total: 0, unknown_total: 0, grand_total: 0 },
       source: 'gemini',
       meta: {
         issuedAtCandidate: String(extracted.issuedAtCandidate || ''),

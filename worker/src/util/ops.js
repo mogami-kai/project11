@@ -1,6 +1,6 @@
 import { callGas } from '../clients/gas.js';
-import { createMeta } from '../http/response.js';
-import { safeLog } from './redact.js';
+import { createMeta } from '../lib/response.js';
+import { safeLog } from '../lib/redact.js';
 
 export async function tryWriteOpsLogAlert(env, requestId, alertInput) {
   const token = String(env.STAFF_TOKEN_FOR_GAS || '').trim();

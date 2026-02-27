@@ -1,5 +1,5 @@
 import { fetchWithRetry } from '../lib/fetch.js';
-import { safeLog } from '../util/redact.js';
+import { safeLog } from '../lib/redact.js';
 
 const LINE_TIMEOUT_MS = 10000;
 

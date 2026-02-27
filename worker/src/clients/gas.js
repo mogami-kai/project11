@@ -1,6 +1,6 @@
 import { fetchWithRetry } from '../lib/fetch.js';
-import { buildError, fail } from '../http/response.js';
-import { safeLog } from '../util/redact.js';
+import { buildError, fail } from '../lib/response.js';
+import { safeLog } from '../lib/redact.js';
 
 const GAS_TIMEOUT_MS = 15000;
 

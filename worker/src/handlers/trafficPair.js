@@ -1,7 +1,7 @@
 import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
 import { extractReceiptWithGemini, normalizeStationsWithGemini } from '../clients/gemini.js';
-import { buildError, fail, json, ok } from '../http/response.js';
+import { buildError, fail, json, ok } from '../lib/response.js';
 import { requireRegistered } from '../lib/access.js';
 import {
   acquireLock,
@@ -11,7 +11,7 @@ import {
   resolvePayloadHash,
   setIdempotentResponse
 } from '../lib/idempotency.js';
-import { sanitizeDateYmd, sanitizeRequestId, sanitizeUserId } from '../util/validate.js';
+import { sanitizeDateYmd, sanitizeRequestId, sanitizeUserId } from '../lib/validate.js';
 
 const EARLY_MORNING_MAX_HOUR = 5;
 

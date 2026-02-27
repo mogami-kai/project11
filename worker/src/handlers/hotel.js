@@ -1,7 +1,7 @@
 import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
 import { pushLineMessage, replyLineMessage } from '../clients/line.js';
-import { buildError, createMeta, fail, json, ok } from '../http/response.js';
+import { buildError, createMeta, fail, json, ok } from '../lib/response.js';
 import { requireAdmin, requireRegistered } from '../lib/access.js';
 import {
   acquireLock,
@@ -11,8 +11,8 @@ import {
   resolvePayloadHash,
   setIdempotentResponse
 } from '../lib/idempotency.js';
-import { safeLog } from '../util/redact.js';
-import { sanitizeDateYmd, sanitizeRequestId, sanitizeUserId } from '../util/validate.js';
+import { safeLog } from '../lib/redact.js';
+import { sanitizeDateYmd, sanitizeRequestId, sanitizeUserId } from '../lib/validate.js';
 import { finalizeSendGuard, reserveSendGuard } from './reminder.js';
 
 export async function handleHotelPush(request, env, meta, requestId) {

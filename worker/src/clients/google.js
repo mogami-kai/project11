@@ -1,5 +1,5 @@
 import { fetchWithRetry } from '../lib/fetch.js';
-import { safeLog } from '../util/redact.js';
+import { safeLog } from '../lib/redact.js';
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
