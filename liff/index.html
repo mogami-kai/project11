@@ -78,6 +78,11 @@
         <label>勤務日
           <input id="manualWorkDate" type="date" required />
         </label>
+        <label>現場（週次割当）
+          <select id="manualAssignedSite">
+            <option value="">読み込み中...</option>
+          </select>
+        </label>
         <label>出発駅
           <input id="manualFromStation" type="text" required />
         </label>
@@ -102,6 +107,7 @@
         <label class="field-span-2">メモ
           <input id="manualMemo" type="text" />
         </label>
+        <p id="manualOtherSiteHint" class="hint field-span-2 hidden">「その他/臨時」を選択した場合はメモ必須です。</p>
         <button id="manualSubmit" type="submit">送信</button>
       </form>
     </section>

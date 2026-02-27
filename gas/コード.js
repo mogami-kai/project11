@@ -30,12 +30,23 @@ const SHEET_HOTEL_CONFIRMED_ = 'HOTEL_CONFIRMED_LOG';
 const SHEET_MONTHLY_EXPORT_LOG_ = 'MONTHLY_EXPORT_LOG';
 const SHEET_HOTEL_SENT_LOG_ = 'HOTEL_SENT_LOG';
 const SHEET_REMINDER_SENT_LOG_ = 'REMINDER_SENT_LOG';
+const SHEET_ROLE_BINDINGS_ = 'ROLE_BINDINGS';
+const SHEET_SETTINGS_ = 'SETTINGS';
+const SHEET_AUDIT_LOG_ = 'AUDIT_LOG';
+const SHEET_WEEK_ASSIGNMENTS_PREFIX_ = 'WEEK_ASSIGNMENTS_';
+const SHEET_BROADCAST_LOG_PREFIX_ = 'BROADCAST_LOG_';
+const SHEET_FAILED_JOBS_PREFIX_ = 'FAILED_JOBS_';
+const SHEET_APPROVAL_QUEUE_PREFIX_ = 'APPROVAL_QUEUE_';
+const SHEET_MONTHLY_LOCK_PREFIX_ = 'MONTHLY_LOCK_';
 const SHIFT_RAW_PARSER_VERSION_ = 'shift_raw_v1';
 const SHIFT_RAW_PARSE_STATUS_STORED_ = 'stored';
 const SHIFT_RAW_SOURCE_LINE_WEBHOOK_ = 'line_webhook';
 const SHEET_CANONICAL_ALIASES_ = {
   STAFF_MASTER: ['STAFF_MASTER'],
   SITE_MASTER: ['SITE_MASTER'],
+  ROLE_BINDINGS: ['ROLE_BINDINGS'],
+  SETTINGS: ['SETTINGS', 'SYSTEM_CONFIG'],
+  AUDIT_LOG: ['AUDIT_LOG'],
   SHIFT_ASSIGNMENTS: ['SHIFT_ASSIGNMENTS', 'SHIFT'],
   HOTEL_REQUESTS: ['HOTEL_REQUESTS', 'HOTEL_INTENT_LOG'],
   TRAFFIC_CLAIMS: ['TRAFFIC_CLAIMS', 'TRAFFIC_LOG'],
@@ -47,7 +58,10 @@ const SHEET_CANONICAL_ALIASES_ = {
 const SHEET_CANONICAL_HEADERS_ = {
   // Spec: registration_spec 4 Master Fields / v5_spec 3.1 Staff Master
   STAFF_MASTER: ['userId', 'name', 'project', 'lineUserId', 'status', 'updatedAt', 'fullNameKanji', 'fullNameKana', 'nameKana', 'kana', 'birthDate', 'phone', 'tel', 'emergencyRelation', 'emergencyPhone', 'postalCode', 'nearestStation', 'station', 'address', 'isActive', 'lineFollowStatus', 'updatedBy', 'dataHash', 'aliases'],
-  SITE_MASTER: ['siteId', 'projectId', 'workDate', 'siteName', 'siteAddress', 'nearestStations', 'aliases', 'updatedAt'],
+  SITE_MASTER: ['siteId', 'projectId', 'workDate', 'siteName', 'siteAddress', 'nearestStations', 'openChatUrl', 'aliases', 'updatedAt'],
+  ROLE_BINDINGS: ['bindingId', 'slackUserId', 'lineUserId', 'email', 'role', 'isActive', 'updatedAt', 'updatedBy'],
+  SETTINGS: ['configKey', 'configValue', 'updatedAt'],
+  AUDIT_LOG: ['auditId', 'timestamp', 'actorType', 'actorId', 'actorRole', 'action', 'operationId', 'targetType', 'targetId', 'fromState', 'toState', 'detailsJson', 'requestId'],
   LINE_MESSAGE_LOG: ['logId', 'timestamp', 'requestId', 'channel', 'event', 'lineUserId', 'userId', 'status', 'errorCode', 'payloadJson'],
   ADMIN_ALERTS: ['alertId', 'timestamp', 'requestId', 'severity', 'source', 'event', 'message', 'payloadJson', 'status'],
   SYSTEM_CONFIG: ['configKey', 'configValue', 'updatedAt']
@@ -126,6 +140,18 @@ function doPost(e) {
       case 'shift.raw.recent':      return handleShiftRawRecent_(ss, req.data, requestId);
       case 'shift.parse.run':       return handleShiftParseRun_(ss, req.data, requestId);
       case 'shift.parse.stats':     return handleShiftParseStats_(ss, requestId);
+      case 'my.week.assignments':   return handleMyWeekAssignments_(ss, req.data, requestId);
+      case 'admin.role.resolve':    return handleAdminRoleResolve_(ss, req.data, requestId);
+      case 'admin.broadcast.preview': return handleAdminBroadcastPreview_(ss, req.data, requestId);
+      case 'admin.broadcast.send.prepare': return handleAdminBroadcastSendPrepare_(ss, req.data, requestId);
+      case 'admin.broadcast.send.finalize': return handleAdminBroadcastSendFinalize_(ss, req.data, requestId);
+      case 'admin.broadcast.retryFailed.prepare': return handleAdminBroadcastRetryFailedPrepare_(ss, req.data, requestId);
+      case 'admin.broadcast.retryFailed.finalize': return handleAdminBroadcastRetryFailedFinalize_(ss, req.data, requestId);
+      case 'admin.approval.pending': return handleAdminApprovalPending_(ss, req.data, requestId);
+      case 'admin.approval.decide': return handleAdminApprovalDecide_(ss, req.data, requestId);
+      case 'admin.monthly.close.export': return handleAdminMonthlyCloseExport_(ss, req.data, requestId);
+      case 'admin.hotel.summary': return handleAdminHotelSummary_(ss, req.data, requestId);
+      case 'admin.audit.lookup': return handleAdminAuditLookup_(ss, req.data, requestId);
       default:
         return errorResponse_('E_UNSUPPORTED_ACTION', 'Unsupported action.', { action: req.action }, requestId);
     }
@@ -3442,7 +3468,8 @@ function ensureStaffMasterSheet_(ss) {
 function ensureSiteMasterSheet_(ss) {
   let sheet = ss.getSheetByName(SHEET_SITE_MASTER_);
   if (!sheet) sheet = ss.insertSheet(SHEET_SITE_MASTER_);
-  ensureHeaderRowIfEmpty_(sheet, ['siteId','projectId','workDate','siteName','siteAddress','nearestStations','aliases','updatedAt']);
+  ensureHeaderRowIfEmpty_(sheet, ['siteId','projectId','workDate','siteName','siteAddress','nearestStations','openChatUrl','aliases','updatedAt']);
+  ensureHeaderColumnsExist_(sheet, ['siteId','projectId','workDate','siteName','siteAddress','nearestStations','openChatUrl','aliases','updatedAt']);
   return sheet;
 }
 
@@ -3972,4 +3999,1881 @@ function DEBUG_shiftLastRow_() {
   const ss    = SpreadsheetApp.openById(props.getProperty('SPREADSHEET_ID'));
   const sh    = ss.getSheetByName('SHIFT');
   Logger.log({ sheetFound: !!sh, lastRow: sh ? sh.getLastRow() : null, lastCol: sh ? sh.getLastColumn() : null });
+}
+
+/* =========================================================
+ * V7 Additions (Slack Admin + Weekly Broadcast + Week Assignments)
+ * =======================================================*/
+
+function handleMyWeekAssignments_(ss, data, requestId) {
+  const userId = sanitizeString_(data && data.userId);
+  const targetDate = normalizeYmd_(data && data.targetDate) || Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd');
+  const requestedWeekId = sanitizeString_(data && data.weekId);
+
+  const fields = [];
+  if (!userId) fields.push({ field: 'userId', reason: 'required' });
+  if (!targetDate) fields.push({ field: 'targetDate', reason: 'must be YYYY-MM-DD' });
+  if (fields.length) return errorResponse_('E_VALIDATION', 'Validation failed.', { fields }, requestId);
+
+  const weekId = requestedWeekId || deriveIsoWeekId_(targetDate);
+  const monthCandidates = monthCandidatesForTargetDate_(targetDate);
+  const items = queryWeekAssignmentsForUser_(ss, userId, weekId, monthCandidates);
+
+  const sorted = items.sort(function(a, b) {
+    if (a.workDate !== b.workDate) return String(a.workDate).localeCompare(String(b.workDate));
+    if (a.siteName !== b.siteName) return String(a.siteName).localeCompare(String(b.siteName));
+    return String(a.role).localeCompare(String(b.role));
+  });
+
+  const siteMap = {};
+  sorted.forEach(function(row) {
+    const key = sanitizeString_(row.siteId) || sanitizeString_(row.siteName);
+    if (!key) return;
+    if (!siteMap[key]) {
+      siteMap[key] = {
+        siteId: sanitizeString_(row.siteId),
+        siteName: sanitizeString_(row.siteName) || sanitizeString_(row.siteRaw),
+        openChatUrl: sanitizeString_(row.openChatUrl)
+      };
+    }
+  });
+
+  const siteOptions = Object.keys(siteMap)
+    .map(function(key) { return siteMap[key]; })
+    .sort(function(a, b) { return String(a.siteName).localeCompare(String(b.siteName)); });
+
+  const targetDayItems = sorted.filter(function(row) { return sanitizeString_(row.workDate) === targetDate; });
+  const defaultAssignment = targetDayItems.length > 0 ? targetDayItems[0] : (sorted.length > 0 ? sorted[0] : null);
+
+  return okResponse_(
+    {
+      userId,
+      weekId,
+      targetDate,
+      assignments: sorted,
+      siteOptions,
+      defaultAssignment,
+      hasAssignments: sorted.length > 0
+    },
+    requestId
+  );
+}
+
+function handleAdminRoleResolve_(ss, data, requestId) {
+  const slackUserId = sanitizeString_(data && (data.slackUserId || data.actorSlackUserId));
+  if (!slackUserId) {
+    return errorResponse_('E_VALIDATION', 'Validation failed.', { fields: [{ field: 'slackUserId', reason: 'required' }] }, requestId);
+  }
+
+  const actor = resolveRoleBindingBySlackUserId_(ss, slackUserId);
+  return okResponse_(
+    {
+      slackUserId,
+      allowed: actor.allowed,
+      role: actor.role,
+      roleBinding: actor.roleBinding
+    },
+    requestId
+  );
+}
+
+function handleAdminBroadcastPreview_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'VIEWER', requestId, 'admin.broadcast.preview');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const targetMonth = sanitizeString_(data && data.targetMonth);
+  const rawText = sanitizeString_(data && data.rawText);
+  const operationId = sanitizeString_(data && data.operationId) || requestId;
+
+  const fields = [];
+  if (!/^\d{4}-\d{2}$/.test(targetMonth)) fields.push({ field: 'targetMonth', reason: 'must be YYYY-MM' });
+  if (!rawText) fields.push({ field: 'rawText', reason: 'required' });
+  if (!operationId) fields.push({ field: 'operationId', reason: 'required' });
+  if (fields.length) return errorResponse_('E_VALIDATION', 'Validation failed.', { fields }, requestId);
+
+  return withScriptLock_(requestId, function() {
+    const parsed = parseWeeklyBroadcastPayloadV7_(ss, targetMonth, rawText, requestId);
+    if (!parsed.ok) {
+      return errorResponse_(parsed.code || 'E_VALIDATION', parsed.message || 'Parse failed.', parsed.details || {}, requestId);
+    }
+
+    const previewPayload = {
+      weekId: parsed.weekId,
+      targetMonth: targetMonth,
+      siteSummaries: parsed.preview.siteSummaries,
+      missingStaff: parsed.preview.missingStaff,
+      missingSiteMaster: parsed.preview.missingSiteMaster,
+      missingOpenChat: parsed.preview.missingOpenChat,
+      unmatchedNames: parsed.preview.unmatchedNames,
+      parseErrors: parsed.preview.parseErrors,
+      totalAssignments: parsed.records.length,
+      recipientCount: parsed.records.length
+    };
+
+    const logSheet = ensureBroadcastLogMonthSheet_(ss, targetMonth);
+    const existing = findBroadcastLogByOperationId_(logSheet, operationId);
+    const existingStatus = sanitizeString_(existing.status).toUpperCase();
+    const broadcastId = sanitizeString_(existing.broadcastId) || buildBroadcastId_(targetMonth);
+    const isFinalized = existingStatus === 'PREPARED' || existingStatus === 'SENT' || existingStatus === 'PARTIAL';
+    const responseStatus = isFinalized ? existingStatus : 'DRAFT';
+
+    if (!isFinalized) {
+      const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+      const logUpsert = upsertSheetRowById_(logSheet, 'broadcastId', broadcastId, {
+        broadcastId: broadcastId,
+        operationId: operationId,
+        weekId: parsed.weekId,
+        targetMonth: targetMonth,
+        status: 'DRAFT',
+        preparedAt: '',
+        sentAt: '',
+        sentCount: 0,
+        failedCount: 0,
+        skippedCount: 0,
+        totalRecipients: parsed.records.length,
+        missingStaffJson: safeJsonStringify_(parsed.preview.missingStaff),
+        missingSiteMasterJson: safeJsonStringify_(parsed.preview.missingSiteMaster),
+        missingOpenChatJson: safeJsonStringify_(parsed.preview.missingOpenChat),
+        unmatchedNamesJson: safeJsonStringify_(parsed.preview.unmatchedNames),
+        previewJson: safeJsonStringify_(previewPayload),
+        rawText: rawText,
+        requestId: requestId,
+        updatedAt: nowStr
+      });
+      if (!logUpsert.ok) {
+        return errorResponse_(logUpsert.code, logUpsert.message, logUpsert.details || {}, requestId, true);
+      }
+    }
+
+    appendAuditLog_(ss, {
+      actorType: roleCheck.actor.actorType,
+      actorId: roleCheck.actor.actorId,
+      actorRole: roleCheck.actor.role,
+      action: 'admin.broadcast.preview',
+      operationId: operationId,
+      targetType: 'broadcast.preview',
+      targetId: parsed.weekId,
+      fromState: '',
+      toState: responseStatus,
+      details: {
+        targetMonth,
+        weekId: parsed.weekId,
+        broadcastId: broadcastId,
+        status: responseStatus,
+        totalAssignments: parsed.records.length,
+        missingStaffCount: parsed.preview.missingStaff.length
+      },
+      requestId: requestId
+    });
+
+    return okResponse_(
+      {
+        broadcastId: broadcastId,
+        status: responseStatus,
+        operationId,
+        targetMonth,
+        weekId: parsed.weekId,
+        siteCount: parsed.preview.siteSummaries.length,
+        totalAssignments: parsed.records.length,
+        missingStaff: parsed.preview.missingStaff,
+        missingSiteMaster: parsed.preview.missingSiteMaster,
+        missingOpenChat: parsed.preview.missingOpenChat,
+        unmatchedNames: parsed.preview.unmatchedNames,
+        siteSummaries: parsed.preview.siteSummaries,
+        preview: parsed.preview
+      },
+      requestId
+    );
+  });
+}
+
+function handleAdminBroadcastSendPrepare_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'APPROVER', requestId, 'admin.broadcast.send.prepare');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const targetMonth = sanitizeString_(data && data.targetMonth);
+  const rawText = sanitizeString_(data && data.rawText);
+  const operationId = sanitizeString_(data && data.operationId) || requestId;
+
+  const fields = [];
+  if (!/^\d{4}-\d{2}$/.test(targetMonth)) fields.push({ field: 'targetMonth', reason: 'must be YYYY-MM' });
+  if (!rawText) fields.push({ field: 'rawText', reason: 'required' });
+  if (!operationId) fields.push({ field: 'operationId', reason: 'required' });
+  if (fields.length) return errorResponse_('E_VALIDATION', 'Validation failed.', { fields }, requestId);
+
+  return withScriptLock_(requestId, function() {
+    if (isMonthLocked_(ss, targetMonth)) {
+      return errorResponse_('E_MONTH_LOCKED', 'Target month is locked. Post-lock changes must be recorded as adjustment in next month.', {
+        month: targetMonth,
+        adjustmentMonth: addMonthsYm_(targetMonth, 1)
+      }, requestId, false);
+    }
+
+    const logSheet = ensureBroadcastLogMonthSheet_(ss, targetMonth);
+    const existing = findBroadcastLogByOperationId_(logSheet, operationId);
+    const existingStatus = sanitizeString_(existing.status).toUpperCase();
+    if (existing.row > 0 && existingStatus && existingStatus !== 'DRAFT') {
+      const existingBroadcastId = sanitizeString_(existing.broadcastId);
+      const recipients = existingStatus === 'PREPARED' && existingBroadcastId
+        ? listBroadcastRecipientsByBroadcastId_(ss, existingBroadcastId)
+        : [];
+      return okResponse_({
+        alreadyProcessed: true,
+        broadcastId: existingBroadcastId,
+        operationId,
+        targetMonth,
+        status: existing.status,
+        preview: existing.preview,
+        recipients: recipients
+      }, requestId);
+    }
+
+    const parsed = parseWeeklyBroadcastPayloadV7_(ss, targetMonth, rawText, requestId);
+    if (!parsed.ok) {
+      return errorResponse_(parsed.code || 'E_VALIDATION', parsed.message || 'Parse failed.', parsed.details || {}, requestId);
+    }
+
+    const broadcastId = sanitizeString_(existing.broadcastId) || buildBroadcastId_(targetMonth);
+    const persisted = persistWeekAssignmentsFromBroadcast_(ss, {
+      targetMonth,
+      weekId: parsed.weekId,
+      broadcastId,
+      operationId,
+      records: parsed.records,
+      requestId
+    });
+
+    if (!persisted.ok) {
+      return errorResponse_(persisted.code || 'E_APPEND_FAILED', persisted.message || 'Failed to persist assignments.', persisted.details || {}, requestId, true);
+    }
+
+    const recipients = buildBroadcastRecipientsFromRecords_(parsed.records);
+    const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+    const previewPayload = {
+      weekId: parsed.weekId,
+      targetMonth,
+      siteSummaries: parsed.preview.siteSummaries,
+      missingStaff: parsed.preview.missingStaff,
+      missingSiteMaster: parsed.preview.missingSiteMaster,
+      missingOpenChat: parsed.preview.missingOpenChat,
+      unmatchedNames: parsed.preview.unmatchedNames,
+      totalAssignments: parsed.records.length,
+      recipientCount: recipients.length
+    };
+
+    const logUpsert = upsertSheetRowById_(logSheet, 'broadcastId', broadcastId, {
+      broadcastId: broadcastId,
+      operationId: operationId,
+      weekId: parsed.weekId,
+      targetMonth: targetMonth,
+      status: 'PREPARED',
+      preparedAt: nowStr,
+      sentAt: '',
+      sentCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      totalRecipients: recipients.length,
+      missingStaffJson: safeJsonStringify_(parsed.preview.missingStaff),
+      missingSiteMasterJson: safeJsonStringify_(parsed.preview.missingSiteMaster),
+      missingOpenChatJson: safeJsonStringify_(parsed.preview.missingOpenChat),
+      unmatchedNamesJson: safeJsonStringify_(parsed.preview.unmatchedNames),
+      previewJson: safeJsonStringify_(previewPayload),
+      rawText: rawText,
+      requestId: requestId,
+      updatedAt: nowStr
+    });
+    if (!logUpsert.ok) return errorResponse_(logUpsert.code, logUpsert.message, logUpsert.details || {}, requestId, true);
+
+    appendAuditLog_(ss, {
+      actorType: roleCheck.actor.actorType,
+      actorId: roleCheck.actor.actorId,
+      actorRole: roleCheck.actor.role,
+      action: 'admin.broadcast.send.prepare',
+      operationId: operationId,
+      targetType: 'broadcast',
+      targetId: broadcastId,
+      fromState: '',
+      toState: 'PREPARED',
+      details: {
+        targetMonth,
+        weekId: parsed.weekId,
+        recipientCount: recipients.length,
+        totalAssignments: parsed.records.length,
+        insertedRows: persisted.insertedRows
+      },
+      requestId: requestId
+    });
+
+    return okResponse_({
+      broadcastId,
+      operationId,
+      targetMonth,
+      weekId: parsed.weekId,
+      preview: previewPayload,
+      recipients,
+      alreadyProcessed: false
+    }, requestId);
+  });
+}
+
+function handleAdminBroadcastSendFinalize_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'APPROVER', requestId, 'admin.broadcast.send.finalize');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const targetMonth = sanitizeString_(data && data.targetMonth);
+  const broadcastId = sanitizeString_(data && data.broadcastId);
+  const operationId = sanitizeString_(data && data.operationId) || requestId;
+  const delivery = data && data.delivery && typeof data.delivery === 'object' ? data.delivery : {};
+  const deliveries = Array.isArray(delivery.deliveries) ? delivery.deliveries : [];
+
+  const fields = [];
+  if (!/^\d{4}-\d{2}$/.test(targetMonth)) fields.push({ field: 'targetMonth', reason: 'must be YYYY-MM' });
+  if (!broadcastId) fields.push({ field: 'broadcastId', reason: 'required' });
+  if (!operationId) fields.push({ field: 'operationId', reason: 'required' });
+  if (fields.length) return errorResponse_('E_VALIDATION', 'Validation failed.', { fields }, requestId);
+
+  return withScriptLock_(requestId, function() {
+    const logSheet = ensureBroadcastLogMonthSheet_(ss, targetMonth);
+    const current = findBroadcastLogByBroadcastId_(logSheet, broadcastId);
+    if (current.row < 2) {
+      return errorResponse_('E_NOT_FOUND', 'Broadcast log not found.', { broadcastId, targetMonth }, requestId);
+    }
+
+    if (current.status === 'SENT' || current.status === 'PARTIAL') {
+      return okResponse_({
+        alreadyProcessed: true,
+        broadcastId,
+        targetMonth,
+        status: current.status,
+        sentCount: Number(current.sentCount || 0),
+        failedCount: Number(current.failedCount || 0),
+        skippedCount: Number(current.skippedCount || 0)
+      }, requestId);
+    }
+
+    if (current.status !== 'PREPARED') {
+      return errorResponse_('E_INVALID_STATE', 'Broadcast can only be finalized from PREPARED.', {
+        broadcastId,
+        currentStatus: current.status
+      }, requestId, false);
+    }
+
+    const pushed = Number(delivery.pushed || 0);
+    const failed = Number(delivery.failed || 0);
+    const skipped = Number(delivery.skipped || 0);
+    const finalStatus = failed > 0 ? 'PARTIAL' : 'SENT';
+    const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+
+    const failedJobStats = persistFailedJobsFromDeliveries_(ss, targetMonth, {
+      broadcastId,
+      operationId,
+      deliveries,
+      requestId
+    });
+
+    const patch = {
+      status: finalStatus,
+      sentAt: nowStr,
+      sentCount: pushed,
+      failedCount: failed,
+      skippedCount: skipped,
+      updatedAt: nowStr,
+      requestId: requestId
+    };
+
+    const upsert = upsertSheetRowById_(logSheet, 'broadcastId', broadcastId, patch);
+    if (!upsert.ok) return errorResponse_(upsert.code, upsert.message, upsert.details || {}, requestId, true);
+
+    appendAuditLog_(ss, {
+      actorType: roleCheck.actor.actorType,
+      actorId: roleCheck.actor.actorId,
+      actorRole: roleCheck.actor.role,
+      action: 'admin.broadcast.send.finalize',
+      operationId: operationId,
+      targetType: 'broadcast',
+      targetId: broadcastId,
+      fromState: 'PREPARED',
+      toState: finalStatus,
+      details: {
+        targetMonth,
+        pushed,
+        failed,
+        skipped,
+        failedJobsCreated: failedJobStats.created,
+        failedJobsWriteFailed: failedJobStats.writeFailed
+      },
+      requestId: requestId
+    });
+
+    return okResponse_({
+      broadcastId,
+      targetMonth,
+      status: finalStatus,
+      sentCount: pushed,
+      failedCount: failed,
+      skippedCount: skipped,
+      failedJobsCreated: failedJobStats.created,
+      failedJobsWriteFailed: failedJobStats.writeFailed,
+      warning: failedJobStats.writeFailed > 0 ? 'FAILED_JOB_WRITE_PARTIAL' : ''
+    }, requestId);
+  });
+}
+
+function handleAdminBroadcastRetryFailedPrepare_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'APPROVER', requestId, 'admin.broadcast.retryFailed.prepare');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const targetMonth = sanitizeString_(data && data.targetMonth);
+  const broadcastId = sanitizeString_(data && data.broadcastId);
+  const operationId = sanitizeString_(data && data.operationId) || requestId;
+
+  const fields = [];
+  if (!/^\d{4}-\d{2}$/.test(targetMonth)) fields.push({ field: 'targetMonth', reason: 'must be YYYY-MM' });
+  if (!broadcastId) fields.push({ field: 'broadcastId', reason: 'required' });
+  if (!operationId) fields.push({ field: 'operationId', reason: 'required' });
+  if (fields.length) return errorResponse_('E_VALIDATION', 'Validation failed.', { fields }, requestId);
+
+  const failedJobs = listFailedJobsByBroadcast_(ss, targetMonth, broadcastId);
+
+  appendAuditLog_(ss, {
+    actorType: roleCheck.actor.actorType,
+    actorId: roleCheck.actor.actorId,
+    actorRole: roleCheck.actor.role,
+    action: 'admin.broadcast.retryFailed.prepare',
+    operationId: operationId,
+    targetType: 'broadcast',
+    targetId: broadcastId,
+    fromState: '',
+    toState: 'RETRY_PREPARED',
+    details: {
+      targetMonth,
+      failedJobCount: failedJobs.length
+    },
+    requestId: requestId
+  });
+
+  return okResponse_({
+    broadcastId,
+    targetMonth,
+    operationId,
+    failedJobs: failedJobs
+  }, requestId);
+}
+
+function handleAdminBroadcastRetryFailedFinalize_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'APPROVER', requestId, 'admin.broadcast.retryFailed.finalize');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const targetMonth = sanitizeString_(data && data.targetMonth);
+  const broadcastId = sanitizeString_(data && data.broadcastId);
+  const operationId = sanitizeString_(data && data.operationId) || requestId;
+  const delivery = data && data.delivery && typeof data.delivery === 'object' ? data.delivery : {};
+  const deliveries = Array.isArray(delivery.deliveries) ? delivery.deliveries : [];
+
+  const fields = [];
+  if (!/^\d{4}-\d{2}$/.test(targetMonth)) fields.push({ field: 'targetMonth', reason: 'must be YYYY-MM' });
+  if (!broadcastId) fields.push({ field: 'broadcastId', reason: 'required' });
+  if (!operationId) fields.push({ field: 'operationId', reason: 'required' });
+  if (fields.length) return errorResponse_('E_VALIDATION', 'Validation failed.', { fields }, requestId);
+
+  return withScriptLock_(requestId, function() {
+    const updated = finalizeFailedJobRetries_(ss, targetMonth, deliveries, requestId);
+    const remainingFailed = listFailedJobsByBroadcast_(ss, targetMonth, broadcastId).length;
+    const finalStatus = remainingFailed > 0 ? 'PARTIAL' : 'SENT';
+    const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+    const logSheet = ensureBroadcastLogMonthSheet_(ss, targetMonth);
+    const logUpsert = upsertSheetRowById_(logSheet, 'broadcastId', broadcastId, {
+      status: finalStatus,
+      failedCount: remainingFailed,
+      updatedAt: nowStr,
+      requestId: requestId
+    });
+    if (!logUpsert.ok) return errorResponse_(logUpsert.code, logUpsert.message, logUpsert.details || {}, requestId, true);
+
+    appendAuditLog_(ss, {
+      actorType: roleCheck.actor.actorType,
+      actorId: roleCheck.actor.actorId,
+      actorRole: roleCheck.actor.role,
+      action: 'admin.broadcast.retryFailed.finalize',
+      operationId: operationId,
+      targetType: 'broadcast',
+      targetId: broadcastId,
+      fromState: 'RETRY_PREPARED',
+      toState: 'RETRY_DONE',
+      details: {
+        targetMonth,
+        updated: updated,
+        remainingFailed: remainingFailed,
+        status: finalStatus
+      },
+      requestId: requestId
+    });
+
+    return okResponse_({
+      broadcastId,
+      targetMonth,
+      operationId,
+      updated,
+      remainingFailed: remainingFailed,
+      status: finalStatus
+    }, requestId);
+  });
+}
+
+function handleAdminApprovalPending_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'VIEWER', requestId, 'admin.approval.pending');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const month = sanitizeString_(data && data.month) || Utilities.formatDate(new Date(), TZ_, 'yyyy-MM');
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return errorResponse_('E_VALIDATION', 'Validation failed.', { fields: [{ field: 'month', reason: 'must be YYYY-MM' }] }, requestId);
+  }
+
+  const sheet = ensureApprovalQueueMonthSheet_(ss, month);
+  const table = readTable_(sheet);
+  const items = [];
+  if (table.ok && table.values.length > 1) {
+    const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+    const idxApprovalId = indexOfHeader_(headers, ['approvalid']);
+    const idxKind = indexOfHeader_(headers, ['kind']);
+    const idxStatus = indexOfHeader_(headers, ['status']);
+    const idxTargetId = indexOfHeader_(headers, ['targetid']);
+    const idxCreatedAt = indexOfHeader_(headers, ['createdat']);
+    const idxRequestedBy = indexOfHeader_(headers, ['requestedby']);
+    const idxReason = indexOfHeader_(headers, ['reason']);
+    for (let r = 1; r < table.values.length; r++) {
+      const row = table.values[r];
+      if (sanitizeString_(row[idxStatus]).toUpperCase() !== 'PENDING') continue;
+      items.push({
+        approvalId: idxApprovalId >= 0 ? sanitizeString_(row[idxApprovalId]) : '',
+        kind: idxKind >= 0 ? sanitizeString_(row[idxKind]) : '',
+        status: idxStatus >= 0 ? sanitizeString_(row[idxStatus]) : 'PENDING',
+        targetId: idxTargetId >= 0 ? sanitizeString_(row[idxTargetId]) : '',
+        createdAt: idxCreatedAt >= 0 ? sanitizeString_(row[idxCreatedAt]) : '',
+        requestedBy: idxRequestedBy >= 0 ? sanitizeString_(row[idxRequestedBy]) : '',
+        reason: idxReason >= 0 ? sanitizeString_(row[idxReason]) : ''
+      });
+    }
+  }
+
+  return okResponse_({ month, items }, requestId);
+}
+
+function handleAdminApprovalDecide_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'APPROVER', requestId, 'admin.approval.decide');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const approvalId = sanitizeString_(data && data.approvalId);
+  const decisionRaw = sanitizeString_(data && data.decision).toUpperCase();
+  const decision = decisionRaw === 'APPROVE' ? 'APPROVED' : (decisionRaw === 'REJECT' ? 'REJECTED' : '');
+  const reason = sanitizeString_(data && data.reason);
+
+  const fields = [];
+  if (!approvalId) fields.push({ field: 'approvalId', reason: 'required' });
+  if (!decision) fields.push({ field: 'decision', reason: 'must be approve/reject' });
+  if (fields.length) return errorResponse_('E_VALIDATION', 'Validation failed.', { fields }, requestId);
+
+  return withScriptLock_(requestId, function() {
+    const located = findApprovalById_(ss, approvalId);
+    if (!located.sheet || located.row < 2) {
+      return errorResponse_('E_NOT_FOUND', 'Approval not found.', { approvalId }, requestId);
+    }
+
+    if (sanitizeString_(located.status).toUpperCase() !== 'PENDING') {
+      return errorResponse_('E_INVALID_STATE', 'Approval can only be decided from PENDING.', {
+        approvalId,
+        currentStatus: located.status
+      }, requestId, false);
+    }
+
+    const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+    const patch = {
+      status: decision,
+      decidedAt: nowStr,
+      decidedBy: roleCheck.actor.actorId,
+      decisionReason: reason,
+      updatedAt: nowStr,
+      requestId: requestId
+    };
+
+    const upsert = upsertSheetRowById_(located.sheet, 'approvalId', approvalId, patch);
+    if (!upsert.ok) return errorResponse_(upsert.code, upsert.message, upsert.details || {}, requestId, true);
+
+    appendAuditLog_(ss, {
+      actorType: roleCheck.actor.actorType,
+      actorId: roleCheck.actor.actorId,
+      actorRole: roleCheck.actor.role,
+      action: 'admin.approval.decide',
+      operationId: sanitizeString_(data && data.operationId) || requestId,
+      targetType: 'approval',
+      targetId: approvalId,
+      fromState: 'PENDING',
+      toState: decision,
+      details: {
+        reason: reason
+      },
+      requestId: requestId
+    });
+
+    return okResponse_({ approvalId, status: decision }, requestId);
+  });
+}
+
+function handleAdminMonthlyCloseExport_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'ADMIN', requestId, 'admin.monthly.close.export');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const month = sanitizeString_(data && data.month);
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return errorResponse_('E_VALIDATION', 'Validation failed.', { fields: [{ field: 'month', reason: 'must be YYYY-MM' }] }, requestId);
+  }
+
+  return withScriptLock_(requestId, function() {
+    const lockSheet = ensureMonthlyLockSheet_(ss, month);
+    const lock = findMonthlyLockByMonth_(lockSheet, month);
+    if (lock.row > 0 && sanitizeString_(lock.status).toUpperCase() === 'LOCKED') {
+      return okResponse_({
+        month,
+        status: 'LOCKED',
+        alreadyLocked: true,
+        fileId: lock.exportFileId,
+        fileUrl: lock.exportFileUrl
+      }, requestId);
+    }
+
+    const exportOutput = handleMonthlyFileGenerate_(ss, { month: month }, requestId);
+    const exportPayload = parseActionResponsePayload_(exportOutput);
+    if (!exportPayload || exportPayload.ok !== true) {
+      return errorResponse_('E_UPSTREAM', 'monthly.file.generate failed.', {
+        month,
+        response: exportPayload || null
+      }, requestId, true);
+    }
+
+    const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+    const upsert = upsertSheetRowById_(lockSheet, 'month', month, {
+      month: month,
+      status: 'LOCKED',
+      lockedAt: nowStr,
+      lockedBy: roleCheck.actor.actorId,
+      exportFileId: sanitizeString_(exportPayload.data && exportPayload.data.fileId),
+      exportFileUrl: sanitizeString_(exportPayload.data && exportPayload.data.fileUrl),
+      requestId: requestId,
+      updatedAt: nowStr
+    });
+    if (!upsert.ok) return errorResponse_(upsert.code, upsert.message, upsert.details || {}, requestId, true);
+
+    appendAuditLog_(ss, {
+      actorType: roleCheck.actor.actorType,
+      actorId: roleCheck.actor.actorId,
+      actorRole: roleCheck.actor.role,
+      action: 'admin.monthly.close.export',
+      operationId: sanitizeString_(data && data.operationId) || requestId,
+      targetType: 'month',
+      targetId: month,
+      fromState: 'OPEN',
+      toState: 'LOCKED',
+      details: {
+        fileId: sanitizeString_(exportPayload.data && exportPayload.data.fileId),
+        fileUrl: sanitizeString_(exportPayload.data && exportPayload.data.fileUrl)
+      },
+      requestId: requestId
+    });
+
+    return okResponse_({
+      month,
+      status: 'LOCKED',
+      alreadyLocked: false,
+      fileId: sanitizeString_(exportPayload.data && exportPayload.data.fileId),
+      fileUrl: sanitizeString_(exportPayload.data && exportPayload.data.fileUrl)
+    }, requestId);
+  });
+}
+
+function handleAdminHotelSummary_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'VIEWER', requestId, 'admin.hotel.summary');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const weekId = sanitizeString_(data && data.weekId);
+  const siteId = sanitizeString_(data && data.siteId);
+  const roleFilter = sanitizeString_(data && data.role).toUpperCase();
+
+  const assignments = queryWeekAssignmentsByFilter_(ss, {
+    weekId: weekId,
+    siteId: siteId,
+    role: roleFilter
+  });
+
+  const requiredUsers = {};
+  assignments.forEach(function(item) {
+    const uid = sanitizeString_(item.userId);
+    if (!uid) return;
+    requiredUsers[uid] = {
+      userId: uid,
+      lineUserId: sanitizeString_(item.lineUserId),
+      name: sanitizeString_(item.staffNameRaw),
+      siteId: sanitizeString_(item.siteId),
+      role: sanitizeString_(item.role)
+    };
+  });
+
+  const requiredList = Object.keys(requiredUsers).map(function(uid) { return requiredUsers[uid]; });
+  const answeredMap = buildHotelAnsweredMapForAssignments_(ss, assignments);
+
+  const answered = [];
+  const missing = [];
+  requiredList.forEach(function(row) {
+    if (answeredMap[row.userId]) answered.push(row);
+    else missing.push(row);
+  });
+
+  return okResponse_({
+    weekId: weekId,
+    siteId: siteId,
+    role: roleFilter,
+    requiredCount: requiredList.length,
+    answeredCount: answered.length,
+    missingCount: missing.length,
+    required: requiredList,
+    answered: answered,
+    missing: missing
+  }, requestId);
+}
+
+function handleAdminAuditLookup_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'VIEWER', requestId, 'admin.audit.lookup');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const keyword = sanitizeString_(data && data.keyword).toLowerCase();
+  const limit = Math.max(1, Math.min(100, Number(data && data.limit) || 20));
+
+  const sheet = ensureAuditLogSheet_(ss);
+  const table = readTable_(sheet);
+  const items = [];
+  if (table.ok && table.values.length > 1) {
+    const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+    const idxAuditId = indexOfHeader_(headers, ['auditid']);
+    const idxTimestamp = indexOfHeader_(headers, ['timestamp']);
+    const idxActorId = indexOfHeader_(headers, ['actorid']);
+    const idxActorRole = indexOfHeader_(headers, ['actorrole']);
+    const idxAction = indexOfHeader_(headers, ['action']);
+    const idxOperationId = indexOfHeader_(headers, ['operationid']);
+    const idxTargetId = indexOfHeader_(headers, ['targetid']);
+    const idxDetails = indexOfHeader_(headers, ['detailsjson']);
+
+    for (let r = table.values.length - 1; r >= 1; r--) {
+      if (items.length >= limit) break;
+      const row = table.values[r];
+      const item = {
+        auditId: idxAuditId >= 0 ? sanitizeString_(row[idxAuditId]) : '',
+        timestamp: idxTimestamp >= 0 ? sanitizeString_(row[idxTimestamp]) : '',
+        actor: idxActorId >= 0 ? sanitizeString_(row[idxActorId]) : '',
+        actorRole: idxActorRole >= 0 ? sanitizeString_(row[idxActorRole]) : '',
+        event: idxAction >= 0 ? sanitizeString_(row[idxAction]) : '',
+        operationId: idxOperationId >= 0 ? sanitizeString_(row[idxOperationId]) : '',
+        targetId: idxTargetId >= 0 ? sanitizeString_(row[idxTargetId]) : '',
+        detailsJson: idxDetails >= 0 ? sanitizeString_(row[idxDetails]) : ''
+      };
+      if (!keyword) {
+        items.push(item);
+        continue;
+      }
+      const bag = [item.auditId, item.actor, item.actorRole, item.event, item.operationId, item.targetId, item.detailsJson].join(' ').toLowerCase();
+      if (bag.indexOf(keyword) >= 0) items.push(item);
+    }
+  }
+
+  return okResponse_({ keyword: keyword, items: items }, requestId);
+}
+
+function requireAdminRoleForAction_(ss, data, requiredRole, requestId, actionName) {
+  const actorType = sanitizeString_(data && data.actorType).toLowerCase() || 'slack';
+  const required = sanitizeString_(requiredRole).toUpperCase() || 'VIEWER';
+
+  const actorSlackUserId = sanitizeString_(data && data.actorSlackUserId);
+  if (!actorSlackUserId) {
+    return {
+      ok: false,
+      response: errorResponse_('E_FORBIDDEN', 'Slack actor is required.', { action: actionName }, requestId, false)
+    };
+  }
+
+  const roleResolved = resolveRoleBindingBySlackUserId_(ss, actorSlackUserId);
+  if (!roleResolved.allowed) {
+    return {
+      ok: false,
+      response: errorResponse_('E_FORBIDDEN', 'Slack actor has no active role binding.', { action: actionName, actorSlackUserId }, requestId, false)
+    };
+  }
+
+  const actorRank = roleRank_(roleResolved.role);
+  const requiredRank = roleRank_(required);
+  if (actorRank < requiredRank) {
+    return {
+      ok: false,
+      response: errorResponse_('E_FORBIDDEN', 'Insufficient role for action.', {
+        action: actionName,
+        requiredRole: required,
+        currentRole: roleResolved.role
+      }, requestId, false)
+    };
+  }
+
+  return {
+    ok: true,
+    actor: {
+      actorType: actorType,
+      actorId: actorSlackUserId,
+      role: roleResolved.role,
+      roleBinding: roleResolved.roleBinding
+    }
+  };
+}
+
+function resolveRoleBindingBySlackUserId_(ss, slackUserId) {
+  const uid = sanitizeString_(slackUserId);
+  if (!uid) return { allowed: false, role: '', roleBinding: null };
+
+  const sheet = ensureRoleBindingsSheet_(ss);
+  const table = readTable_(sheet);
+  if (!table.ok || table.values.length <= 1) return { allowed: false, role: '', roleBinding: null };
+
+  const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+  const idxSlackUserId = indexOfHeader_(headers, ['slackuserid', 'slack_user_id']);
+  const idxRole = indexOfHeader_(headers, ['role']);
+  const idxIsActive = indexOfHeader_(headers, ['isactive', 'is_active']);
+  const idxBindingId = indexOfHeader_(headers, ['bindingid']);
+  const idxUpdatedAt = indexOfHeader_(headers, ['updatedat']);
+  if (idxSlackUserId < 0 || idxRole < 0) return { allowed: false, role: '', roleBinding: null };
+
+  for (let r = table.values.length - 1; r >= 1; r--) {
+    const row = table.values[r];
+    if (sanitizeString_(row[idxSlackUserId]) !== uid) continue;
+    const role = sanitizeString_(row[idxRole]).toUpperCase();
+    const active = idxIsActive < 0 ? true : parseBooleanValue_(row[idxIsActive], true);
+    if (!active) return { allowed: false, role: role, roleBinding: null };
+    if (roleRank_(role) <= 0) return { allowed: false, role: role, roleBinding: null };
+    return {
+      allowed: true,
+      role: role,
+      roleBinding: {
+        bindingId: idxBindingId >= 0 ? sanitizeString_(row[idxBindingId]) : '',
+        slackUserId: uid,
+        role: role,
+        updatedAt: idxUpdatedAt >= 0 ? sanitizeString_(row[idxUpdatedAt]) : ''
+      }
+    };
+  }
+
+  return { allowed: false, role: '', roleBinding: null };
+}
+
+function roleRank_(role) {
+  const text = sanitizeString_(role).toUpperCase();
+  if (text === 'VIEWER') return 1;
+  if (text === 'APPROVER') return 2;
+  if (text === 'ADMIN') return 3;
+  return 0;
+}
+
+function parseWeeklyBroadcastPayloadV7_(ss, targetMonth, rawText, requestId) {
+  const month = sanitizeString_(targetMonth);
+  const text = String(rawText || '');
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return { ok: false, code: 'E_VALIDATION', message: 'targetMonth must be YYYY-MM', details: { field: 'targetMonth' } };
+  }
+  if (!text.trim()) {
+    return { ok: false, code: 'E_VALIDATION', message: 'rawText is required', details: { field: 'rawText' } };
+  }
+
+  const staffSheet = ss.getSheetByName(SHEET_STAFF_);
+  const siteSheet = ss.getSheetByName(SHEET_SITE_MASTER_);
+  const staffIndex = buildStaffMasterIndex_(staffSheet);
+  const staffMap = staffSheet ? buildStaffMapFast_(staffSheet) : {};
+  const siteIndex = buildSiteMasterExtendedIndex_(siteSheet);
+
+  const blocks = splitBlocks_(text);
+  const records = [];
+  const missingStaff = [];
+  const missingSiteMaster = [];
+  const missingOpenChat = [];
+  const unmatchedNames = [];
+  const siteSummaryMap = {};
+  const parseErrors = [];
+
+  let firstRangeStart = '';
+
+  for (let b = 0; b < blocks.length; b++) {
+    const block = blocks[b] || {};
+    const lines = Array.isArray(block.lines) ? block.lines : [];
+    if (lines.length === 0) continue;
+
+    const header = extractBroadcastHeaderFromLines_(lines);
+    if (!header.ok) {
+      parseErrors.push({
+        blockIndex: b,
+        reason: header.reason || 'header_not_found'
+      });
+      continue;
+    }
+
+    const siteRaw = sanitizeString_(header.siteRaw);
+    const siteFromDay = Number(header.periodFromDay);
+    const siteToDay = Number(header.periodToDay);
+    const range = resolveSiteDateRangeForTargetMonth_(month, siteFromDay, siteToDay);
+    if (!firstRangeStart && range.fromDate) firstRangeStart = range.fromDate;
+
+    const siteHit = matchSiteExtended_(siteRaw, siteIndex);
+    if (!siteHit.siteId) {
+      pushUniqueByKey_(missingSiteMaster, {
+        siteRaw: siteRaw,
+        reason: 'site_master_unmatched'
+      }, 'siteRaw');
+    }
+    if (siteHit.siteId && !siteHit.openChatUrl) {
+      pushUniqueByKey_(missingOpenChat, {
+        siteId: siteHit.siteId,
+        siteName: siteHit.siteNameNorm || siteRaw,
+        siteRaw: siteRaw
+      }, 'siteId');
+    }
+
+    const bodyLines = lines.slice(header.lineIndex + 1);
+    for (let i = 0; i < bodyLines.length; i++) {
+      const line = sanitizeString_(bodyLines[i] && bodyLines[i].lineText);
+      if (!line) continue;
+      const roleMatch = line.match(/^(DL|CL|CA)\s*[:：]\s*(.+)$/i);
+      if (!roleMatch) continue;
+
+      const role = sanitizeString_(roleMatch[1]).toUpperCase();
+      const body = sanitizeString_(roleMatch[2]);
+      const expanded = expandBroadcastRoleBody_(body, month, siteFromDay, siteToDay);
+
+      for (let e = 0; e < expanded.length; e++) {
+        const entry = expanded[e];
+        const staffNameRaw = sanitizeString_(entry.staffNameRaw);
+        const workDate = sanitizeString_(entry.workDate);
+        if (!workDate) continue;
+
+        const matchedUserId = matchStaffUserId_(staffNameRaw, staffIndex);
+        if (!matchedUserId) {
+          if (staffNameRaw) {
+            const missing = {
+              name: staffNameRaw,
+              role: role,
+              siteRaw: siteRaw,
+              workDate: workDate
+            };
+            missingStaff.push(missing);
+            unmatchedNames.push(missing);
+          }
+          continue;
+        }
+
+        const staff = staffMap[matchedUserId] || {};
+        const lineUserId = sanitizeString_(staff.lineUserId);
+        if (!lineUserId) {
+          missingStaff.push({
+            name: staffNameRaw,
+            role: role,
+            siteRaw: siteRaw,
+            workDate: workDate,
+            reason: 'line_user_missing'
+          });
+          continue;
+        }
+
+        const assignmentKey = [matchedUserId, workDate, siteHit.siteId || siteRaw, role].join('|');
+        if (!siteSummaryMap[assignmentKey]) {
+          const item = {
+            userId: matchedUserId,
+            lineUserId: lineUserId,
+            staffNameRaw: staffNameRaw,
+            role: role,
+            workDate: workDate,
+            weekId: '',
+            siteId: sanitizeString_(siteHit.siteId),
+            siteName: sanitizeString_(siteHit.siteNameNorm) || siteRaw,
+            siteRaw: siteRaw,
+            openChatUrl: sanitizeString_(siteHit.openChatUrl),
+            dateRangeFrom: range.fromDate,
+            dateRangeTo: range.toDate,
+            dateRange: range.fromDate && range.toDate ? (range.fromDate + ' ~ ' + range.toDate) : '',
+            targetMonth: month
+          };
+          siteSummaryMap[assignmentKey] = item;
+          records.push(item);
+        }
+
+        const siteSummaryKey = sanitizeString_(siteHit.siteId) || siteRaw;
+        if (!siteSummaryMap['SUMMARY:' + siteSummaryKey]) {
+          siteSummaryMap['SUMMARY:' + siteSummaryKey] = {
+            siteId: sanitizeString_(siteHit.siteId),
+            siteName: sanitizeString_(siteHit.siteNameNorm) || siteRaw,
+            siteRaw: siteRaw,
+            assignmentCount: 0
+          };
+        }
+        siteSummaryMap['SUMMARY:' + siteSummaryKey].assignmentCount += 1;
+      }
+    }
+  }
+
+  const anchor = firstRangeStart || (month + '-01');
+  const weekId = deriveIsoWeekId_(anchor);
+  records.forEach(function(rec) { rec.weekId = weekId; });
+
+  const siteSummaries = Object.keys(siteSummaryMap)
+    .filter(function(k) { return k.indexOf('SUMMARY:') === 0; })
+    .map(function(k) { return siteSummaryMap[k]; })
+    .sort(function(a, b) { return String(a.siteName).localeCompare(String(b.siteName)); });
+
+  return {
+    ok: true,
+    weekId: weekId,
+    records: records,
+    preview: {
+      weekId: weekId,
+      targetMonth: month,
+      totalAssignments: records.length,
+      siteSummaries: siteSummaries,
+      missingStaff: missingStaff,
+      missingSiteMaster: missingSiteMaster,
+      missingOpenChat: missingOpenChat,
+      unmatchedNames: unmatchedNames,
+      parseErrors: parseErrors
+    }
+  };
+}
+
+function extractBroadcastHeaderFromLines_(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = sanitizeString_(lines[i] && lines[i].lineText);
+    if (!line) continue;
+    const parsed = parseSiteHeader_(line);
+    if (parsed.ok) {
+      return {
+        ok: true,
+        lineIndex: i,
+        siteRaw: parsed.siteRaw,
+        periodFromDay: parsed.periodFromDay,
+        periodToDay: parsed.periodToDay
+      };
+    }
+  }
+  return { ok: false, reason: 'site_header_not_found' };
+}
+
+function expandBroadcastRoleBody_(body, targetMonth, siteFromDay, siteToDay) {
+  const text = sanitizeString_(body);
+  if (!text) return [];
+
+  if (text.indexOf('調整中') >= 0) {
+    return [];
+  }
+
+  const normalized = normalizeArrows_(text).replace(/\s*→\s*/g, '→');
+  const segments = normalized.indexOf('→') >= 0
+    ? normalized.split('→').map(function(v) { return sanitizeString_(v); }).filter(Boolean)
+    : [normalized];
+
+  const out = [];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const dayMatch = seg.match(/(\d{1,2})\s*日/);
+    const day = dayMatch ? Number(dayMatch[1]) : null;
+    const noDay = sanitizeString_(seg.replace(/\d{1,2}\s*日/g, ''));
+    const names = splitBroadcastNames_(noDay);
+
+    const dates = day
+      ? [resolveDayToYmdWithMonthContext_(targetMonth, siteFromDay, siteToDay, day)]
+      : expandSiteRangeToYmdList_(targetMonth, siteFromDay, siteToDay);
+
+    for (let d = 0; d < dates.length; d++) {
+      const ymd = sanitizeString_(dates[d]);
+      if (!ymd) continue;
+      for (let n = 0; n < names.length; n++) {
+        const name = sanitizeString_(names[n]);
+        if (!name) continue;
+        out.push({ workDate: ymd, staffNameRaw: name });
+      }
+    }
+  }
+
+  return out;
+}
+
+function splitBroadcastNames_(text) {
+  const src = sanitizeString_(text);
+  if (!src) return [];
+  return src
+    .split(/[、,，\/・]/)
+    .map(function(v) { return sanitizeString_(v); })
+    .filter(Boolean);
+}
+
+function resolveSiteDateRangeForTargetMonth_(targetMonth, fromDay, toDay) {
+  const from = Number(fromDay);
+  const to = Number(toDay);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    return { fromDate: '', toDate: '' };
+  }
+
+  const crossMonth = from > to;
+  if (!crossMonth) {
+    return {
+      fromDate: buildYmdFromMonthDay_(targetMonth, from),
+      toDate: buildYmdFromMonthDay_(targetMonth, to)
+    };
+  }
+
+  const prevMonth = addMonthsYm_(targetMonth, -1);
+  return {
+    fromDate: buildYmdFromMonthDay_(prevMonth, from),
+    toDate: buildYmdFromMonthDay_(targetMonth, to)
+  };
+}
+
+function resolveDayToYmdWithMonthContext_(targetMonth, siteFromDay, siteToDay, day) {
+  const d = Number(day);
+  if (!Number.isFinite(d) || d < 1 || d > 31) return '';
+  const from = Number(siteFromDay);
+  const to = Number(siteToDay);
+  const crossMonth = from > to;
+  if (!crossMonth) {
+    return buildYmdFromMonthDay_(targetMonth, d);
+  }
+  if (d >= from) {
+    return buildYmdFromMonthDay_(addMonthsYm_(targetMonth, -1), d);
+  }
+  return buildYmdFromMonthDay_(targetMonth, d);
+}
+
+function expandSiteRangeToYmdList_(targetMonth, siteFromDay, siteToDay) {
+  const from = Number(siteFromDay);
+  const to = Number(siteToDay);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return [];
+
+  const out = [];
+  if (from <= to) {
+    for (let d = from; d <= to; d++) out.push(buildYmdFromMonthDay_(targetMonth, d));
+    return out;
+  }
+
+  const prevMonth = addMonthsYm_(targetMonth, -1);
+  const prevDays = daysInMonthFromYm_(prevMonth);
+  for (let d = from; d <= prevDays; d++) out.push(buildYmdFromMonthDay_(prevMonth, d));
+  for (let d = 1; d <= to; d++) out.push(buildYmdFromMonthDay_(targetMonth, d));
+  return out;
+}
+
+function addMonthsYm_(month, offset) {
+  const ym = sanitizeString_(month);
+  const m = ym.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return '';
+  let year = Number(m[1]);
+  let mon = Number(m[2]);
+  const off = Number(offset || 0);
+  mon += off;
+  while (mon < 1) { mon += 12; year -= 1; }
+  while (mon > 12) { mon -= 12; year += 1; }
+  return String(year) + '-' + (mon < 10 ? '0' + mon : String(mon));
+}
+
+function deriveIsoWeekId_(ymd) {
+  const dateStr = sanitizeString_(ymd);
+  const base = dateStr.match(/^\d{4}-\d{2}-\d{2}$/) ? new Date(dateStr + 'T00:00:00+09:00') : new Date();
+  if (!base || isNaN(base.getTime())) return '';
+
+  const date = new Date(base.getTime());
+  date.setHours(0, 0, 0, 0);
+  const dayNum = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - dayNum + 3);
+  const firstThursday = new Date(date.getFullYear(), 0, 4);
+  const firstDayNum = (firstThursday.getDay() + 6) % 7;
+  firstThursday.setDate(firstThursday.getDate() - firstDayNum + 3);
+  const week = 1 + Math.round((date.getTime() - firstThursday.getTime()) / 604800000);
+  return String(date.getFullYear()) + '-W' + (week < 10 ? '0' + week : String(week));
+}
+
+function persistWeekAssignmentsFromBroadcast_(ss, input) {
+  const records = Array.isArray(input && input.records) ? input.records : [];
+  const broadcastId = sanitizeString_(input && input.broadcastId);
+  const operationId = sanitizeString_(input && input.operationId);
+  const weekId = sanitizeString_(input && input.weekId);
+  const targetMonth = sanitizeString_(input && input.targetMonth);
+  const requestId = sanitizeString_(input && input.requestId);
+
+  let insertedRows = 0;
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i] || {};
+    const month = normalizeYm_(rec.workDate) || targetMonth;
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+
+    const sheet = ensureWeekAssignmentsMonthSheet_(ss, month);
+    const assignmentId = buildStableIdFromParts_(['wa', weekId, broadcastId, rec.userId, rec.siteId || rec.siteRaw, rec.role, rec.workDate]);
+    const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+
+    const upsert = upsertSheetRowById_(sheet, 'assignmentId', assignmentId, {
+      assignmentId: assignmentId,
+      broadcastId: broadcastId,
+      operationId: operationId,
+      weekId: weekId,
+      targetMonth: targetMonth,
+      workDate: sanitizeString_(rec.workDate),
+      siteId: sanitizeString_(rec.siteId),
+      siteName: sanitizeString_(rec.siteName),
+      siteRaw: sanitizeString_(rec.siteRaw),
+      role: sanitizeString_(rec.role),
+      userId: sanitizeString_(rec.userId),
+      lineUserId: sanitizeString_(rec.lineUserId),
+      staffNameRaw: sanitizeString_(rec.staffNameRaw),
+      dateRangeFrom: sanitizeString_(rec.dateRangeFrom),
+      dateRangeTo: sanitizeString_(rec.dateRangeTo),
+      openChatUrl: sanitizeString_(rec.openChatUrl),
+      status: 'PENDING_SEND',
+      createdAt: nowStr,
+      updatedAt: nowStr,
+      requestId: requestId
+    });
+
+    if (!upsert.ok) return { ok: false, code: upsert.code, message: upsert.message, details: upsert.details || {} };
+    if (upsert.created) insertedRows += 1;
+  }
+
+  return { ok: true, insertedRows: insertedRows };
+}
+
+function buildBroadcastRecipientsFromRecords_(records) {
+  const src = Array.isArray(records) ? records : [];
+  return src.map(function(rec) {
+    return {
+      userId: sanitizeString_(rec.userId),
+      lineUserId: sanitizeString_(rec.lineUserId),
+      weekId: sanitizeString_(rec.weekId),
+      siteId: sanitizeString_(rec.siteId),
+      siteName: sanitizeString_(rec.siteName),
+      siteRaw: sanitizeString_(rec.siteRaw),
+      role: sanitizeString_(rec.role),
+      workDate: sanitizeString_(rec.workDate),
+      dateRange: sanitizeString_(rec.dateRange),
+      openChatUrl: sanitizeString_(rec.openChatUrl)
+    };
+  });
+}
+
+function listBroadcastRecipientsByBroadcastId_(ss, broadcastId) {
+  const id = sanitizeString_(broadcastId);
+  if (!id) return [];
+
+  const out = [];
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    const name = sanitizeString_(sheet.getName());
+    if (name.indexOf(SHEET_WEEK_ASSIGNMENTS_PREFIX_) !== 0) continue;
+
+    const table = readTable_(sheet);
+    if (!table.ok || table.values.length <= 1) continue;
+    const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+    const idxBroadcastId = indexOfHeader_(headers, ['broadcastid']);
+    if (idxBroadcastId < 0) continue;
+
+    const idxStatus = indexOfHeader_(headers, ['status']);
+    const idxUserId = indexOfHeader_(headers, ['userid']);
+    const idxLineUserId = indexOfHeader_(headers, ['lineuserid']);
+    const idxWeekId = indexOfHeader_(headers, ['weekid']);
+    const idxSiteId = indexOfHeader_(headers, ['siteid']);
+    const idxSiteName = indexOfHeader_(headers, ['sitename']);
+    const idxSiteRaw = indexOfHeader_(headers, ['siteraw']);
+    const idxRole = indexOfHeader_(headers, ['role']);
+    const idxWorkDate = indexOfHeader_(headers, ['workdate']);
+    const idxOpenChatUrl = indexOfHeader_(headers, ['openchaturl']);
+    const idxDateRangeFrom = indexOfHeader_(headers, ['daterangefrom']);
+    const idxDateRangeTo = indexOfHeader_(headers, ['daterangeto']);
+
+    for (let r = 1; r < table.values.length; r++) {
+      const row = table.values[r];
+      if (sanitizeString_(row[idxBroadcastId]) !== id) continue;
+      const status = idxStatus >= 0 ? sanitizeString_(row[idxStatus]).toUpperCase() : '';
+      if (status === 'DELETED') continue;
+
+      const dateRangeFrom = idxDateRangeFrom >= 0 ? sanitizeString_(row[idxDateRangeFrom]) : '';
+      const dateRangeTo = idxDateRangeTo >= 0 ? sanitizeString_(row[idxDateRangeTo]) : '';
+      const dateRange = dateRangeFrom && dateRangeTo
+        ? (dateRangeFrom === dateRangeTo ? dateRangeFrom : dateRangeFrom + '〜' + dateRangeTo)
+        : (dateRangeFrom || dateRangeTo);
+
+      out.push({
+        userId: idxUserId >= 0 ? sanitizeString_(row[idxUserId]) : '',
+        lineUserId: idxLineUserId >= 0 ? sanitizeString_(row[idxLineUserId]) : '',
+        weekId: idxWeekId >= 0 ? sanitizeString_(row[idxWeekId]) : '',
+        siteId: idxSiteId >= 0 ? sanitizeString_(row[idxSiteId]) : '',
+        siteName: idxSiteName >= 0 ? sanitizeString_(row[idxSiteName]) : '',
+        siteRaw: idxSiteRaw >= 0 ? sanitizeString_(row[idxSiteRaw]) : '',
+        role: idxRole >= 0 ? sanitizeString_(row[idxRole]) : '',
+        workDate: idxWorkDate >= 0 ? sanitizeString_(row[idxWorkDate]) : '',
+        dateRange: dateRange,
+        openChatUrl: idxOpenChatUrl >= 0 ? sanitizeString_(row[idxOpenChatUrl]) : ''
+      });
+    }
+  }
+
+  return out;
+}
+
+function persistFailedJobsFromDeliveries_(ss, targetMonth, input) {
+  const deliveries = Array.isArray(input && input.deliveries) ? input.deliveries : [];
+  const broadcastId = sanitizeString_(input && input.broadcastId);
+  const operationId = sanitizeString_(input && input.operationId);
+  const requestId = sanitizeString_(input && input.requestId);
+  const sheet = ensureFailedJobsMonthSheet_(ss, targetMonth);
+
+  let created = 0;
+  let writeFailed = 0;
+  for (let i = 0; i < deliveries.length; i++) {
+    const d = deliveries[i] || {};
+    if (sanitizeString_(d.status).toLowerCase() !== 'failed') continue;
+
+    const failedJobId = buildStableIdFromParts_(['fj', broadcastId, sanitizeString_(d.userId), sanitizeString_(d.lineUserId), sanitizeString_(d.siteId), sanitizeString_(d.role), sanitizeString_(d.workDate)]);
+    const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+    const upsert = upsertSheetRowById_(sheet, 'failedJobId', failedJobId, {
+      failedJobId: failedJobId,
+      broadcastId: broadcastId,
+      operationId: operationId,
+      jobType: 'broadcast_send',
+      userId: sanitizeString_(d.userId),
+      lineUserId: sanitizeString_(d.lineUserId),
+      siteId: sanitizeString_(d.siteId),
+      role: sanitizeString_(d.role),
+      workDate: sanitizeString_(d.workDate),
+      errorCode: sanitizeString_(d.errorCode) || 'LINE_PUSH_FAILED',
+      errorMessage: sanitizeString_(d.errorMessage),
+      payloadJson: safeJsonStringify_(d),
+      status: 'pending',
+      retryCount: 0,
+      createdAt: nowStr,
+      updatedAt: nowStr,
+      requestId: requestId
+    });
+    if (upsert.ok && upsert.created) {
+      created += 1;
+    } else if (!upsert.ok) {
+      writeFailed += 1;
+    }
+  }
+
+  return { created: created, writeFailed: writeFailed };
+}
+
+function listFailedJobsByBroadcast_(ss, targetMonth, broadcastId) {
+  const sheet = ensureFailedJobsMonthSheet_(ss, targetMonth);
+  const table = readTable_(sheet);
+  if (!table.ok || table.values.length <= 1) return [];
+
+  const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+  const idxFailedJobId = indexOfHeader_(headers, ['failedjobid']);
+  const idxBroadcastId = indexOfHeader_(headers, ['broadcastid']);
+  const idxLineUserId = indexOfHeader_(headers, ['lineuserid']);
+  const idxStatus = indexOfHeader_(headers, ['status']);
+  const idxRetryCount = indexOfHeader_(headers, ['retrycount']);
+  const idxPayload = indexOfHeader_(headers, ['payloadjson']);
+
+  const out = [];
+  for (let r = 1; r < table.values.length; r++) {
+    const row = table.values[r];
+    if (sanitizeString_(row[idxBroadcastId]) !== broadcastId) continue;
+    const status = sanitizeString_(row[idxStatus]).toLowerCase();
+    if (status !== 'pending' && status !== 'failed') continue;
+    const payload = parseJsonSafe_(idxPayload >= 0 ? row[idxPayload] : '{}');
+    out.push({
+      failedJobId: idxFailedJobId >= 0 ? sanitizeString_(row[idxFailedJobId]) : '',
+      lineUserId: idxLineUserId >= 0 ? sanitizeString_(row[idxLineUserId]) : '',
+      status: status,
+      retryCount: idxRetryCount >= 0 ? Number(row[idxRetryCount] || 0) : 0,
+      recipient: payload && typeof payload === 'object' ? payload : {}
+    });
+  }
+  return out;
+}
+
+function finalizeFailedJobRetries_(ss, targetMonth, deliveries, requestId) {
+  const sheet = ensureFailedJobsMonthSheet_(ss, targetMonth);
+  const table = readTable_(sheet);
+  if (!table.ok || table.values.length <= 1) return { updated: 0, resolved: 0, failed: 0 };
+
+  const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+  const idxFailedJobId = indexOfHeader_(headers, ['failedjobid']);
+  const idxStatus = indexOfHeader_(headers, ['status']);
+  const idxRetryCount = indexOfHeader_(headers, ['retrycount']);
+  const idxErrorCode = indexOfHeader_(headers, ['errorcode']);
+  const idxUpdatedAt = indexOfHeader_(headers, ['updatedat']);
+  const idxRequestId = indexOfHeader_(headers, ['requestid']);
+  if (idxFailedJobId < 0 || idxStatus < 0) return { updated: 0, resolved: 0, failed: 0 };
+
+  const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+  const map = {};
+  (Array.isArray(deliveries) ? deliveries : []).forEach(function(item) {
+    const id = sanitizeString_(item && item.failedJobId);
+    if (!id) return;
+    map[id] = item;
+  });
+
+  let updated = 0;
+  let resolved = 0;
+  let failed = 0;
+
+  for (let r = 1; r < table.values.length; r++) {
+    const row = table.values[r];
+    const id = sanitizeString_(row[idxFailedJobId]);
+    if (!id || !map[id]) continue;
+    const item = map[id];
+    const status = sanitizeString_(item.status).toLowerCase() === 'sent' ? 'resolved' : 'failed';
+    if (idxStatus >= 0) row[idxStatus] = status;
+    if (idxRetryCount >= 0) row[idxRetryCount] = Number(row[idxRetryCount] || 0) + 1;
+    if (idxErrorCode >= 0) row[idxErrorCode] = sanitizeString_(item.errorCode);
+    if (idxUpdatedAt >= 0) row[idxUpdatedAt] = nowStr;
+    if (idxRequestId >= 0) row[idxRequestId] = requestId;
+    setRangeValuesSanitized_(sheet.getRange(r + 1, 1, 1, row.length), [row]);
+    updated += 1;
+    if (status === 'resolved') resolved += 1;
+    else failed += 1;
+  }
+
+  return { updated: updated, resolved: resolved, failed: failed };
+}
+
+function queryWeekAssignmentsForUser_(ss, userId, weekId, monthCandidates) {
+  const uid = sanitizeString_(userId);
+  const targetWeekId = sanitizeString_(weekId);
+  const months = Array.isArray(monthCandidates) ? monthCandidates : [];
+
+  const items = [];
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    const name = sanitizeString_(sheet.getName());
+    if (name.indexOf(SHEET_WEEK_ASSIGNMENTS_PREFIX_) !== 0) continue;
+    const month = name.replace(SHEET_WEEK_ASSIGNMENTS_PREFIX_, '').replace(/_/g, '-');
+    if (months.length > 0 && months.indexOf(month) < 0) continue;
+
+    const table = readTable_(sheet);
+    if (!table.ok || table.values.length <= 1) continue;
+    const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+    const idxUserId = indexOfHeader_(headers, ['userid']);
+    const idxWeekId = indexOfHeader_(headers, ['weekid']);
+    const idxStatus = indexOfHeader_(headers, ['status']);
+    if (idxUserId < 0) continue;
+
+    const idxSiteId = indexOfHeader_(headers, ['siteid']);
+    const idxSiteName = indexOfHeader_(headers, ['sitename']);
+    const idxSiteRaw = indexOfHeader_(headers, ['siteraw']);
+    const idxRole = indexOfHeader_(headers, ['role']);
+    const idxWorkDate = indexOfHeader_(headers, ['workdate']);
+    const idxOpenChatUrl = indexOfHeader_(headers, ['openchaturl']);
+    const idxBroadcastId = indexOfHeader_(headers, ['broadcastid']);
+
+    for (let r = 1; r < table.values.length; r++) {
+      const row = table.values[r];
+      if (sanitizeString_(row[idxUserId]) !== uid) continue;
+      if (targetWeekId && idxWeekId >= 0 && sanitizeString_(row[idxWeekId]) !== targetWeekId) continue;
+      const status = idxStatus >= 0 ? sanitizeString_(row[idxStatus]).toUpperCase() : '';
+      if (status === 'DELETED') continue;
+      items.push({
+        weekId: idxWeekId >= 0 ? sanitizeString_(row[idxWeekId]) : targetWeekId,
+        userId: uid,
+        siteId: idxSiteId >= 0 ? sanitizeString_(row[idxSiteId]) : '',
+        siteName: idxSiteName >= 0 ? sanitizeString_(row[idxSiteName]) : '',
+        siteRaw: idxSiteRaw >= 0 ? sanitizeString_(row[idxSiteRaw]) : '',
+        role: idxRole >= 0 ? sanitizeString_(row[idxRole]) : '',
+        workDate: idxWorkDate >= 0 ? sanitizeString_(row[idxWorkDate]) : '',
+        openChatUrl: idxOpenChatUrl >= 0 ? sanitizeString_(row[idxOpenChatUrl]) : '',
+        broadcastId: idxBroadcastId >= 0 ? sanitizeString_(row[idxBroadcastId]) : ''
+      });
+    }
+  }
+
+  return items;
+}
+
+function queryWeekAssignmentsByFilter_(ss, filter) {
+  const weekId = sanitizeString_(filter && filter.weekId);
+  const siteId = sanitizeString_(filter && filter.siteId);
+  const role = sanitizeString_(filter && filter.role).toUpperCase();
+
+  const items = [];
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    const name = sanitizeString_(sheet.getName());
+    if (name.indexOf(SHEET_WEEK_ASSIGNMENTS_PREFIX_) !== 0) continue;
+
+    const table = readTable_(sheet);
+    if (!table.ok || table.values.length <= 1) continue;
+    const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+    const idxWeekId = indexOfHeader_(headers, ['weekid']);
+    const idxSiteId = indexOfHeader_(headers, ['siteid']);
+    const idxRole = indexOfHeader_(headers, ['role']);
+    const idxUserId = indexOfHeader_(headers, ['userid']);
+    const idxLineUserId = indexOfHeader_(headers, ['lineuserid']);
+    const idxName = indexOfHeader_(headers, ['staffnameraw']);
+    const idxWorkDate = indexOfHeader_(headers, ['workdate']);
+
+    for (let r = 1; r < table.values.length; r++) {
+      const row = table.values[r];
+      if (weekId && idxWeekId >= 0 && sanitizeString_(row[idxWeekId]) !== weekId) continue;
+      if (siteId && idxSiteId >= 0 && sanitizeString_(row[idxSiteId]) !== siteId) continue;
+      if (role && idxRole >= 0 && sanitizeString_(row[idxRole]).toUpperCase() !== role) continue;
+      items.push({
+        weekId: idxWeekId >= 0 ? sanitizeString_(row[idxWeekId]) : weekId,
+        siteId: idxSiteId >= 0 ? sanitizeString_(row[idxSiteId]) : '',
+        role: idxRole >= 0 ? sanitizeString_(row[idxRole]) : '',
+        userId: idxUserId >= 0 ? sanitizeString_(row[idxUserId]) : '',
+        lineUserId: idxLineUserId >= 0 ? sanitizeString_(row[idxLineUserId]) : '',
+        staffNameRaw: idxName >= 0 ? sanitizeString_(row[idxName]) : '',
+        workDate: idxWorkDate >= 0 ? sanitizeString_(row[idxWorkDate]) : ''
+      });
+    }
+  }
+
+  return items;
+}
+
+function buildHotelAnsweredMapForAssignments_(ss, assignments) {
+  const src = Array.isArray(assignments) ? assignments : [];
+  const answered = {};
+  const byMonth = {};
+  src.forEach(function(item) {
+    const ymd = sanitizeString_(item.workDate);
+    const uid = sanitizeString_(item.userId);
+    if (!uid || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return;
+    const month = ymd.slice(0, 7);
+    if (!byMonth[month]) byMonth[month] = {};
+    byMonth[month][uid + '|' + ymd] = true;
+  });
+
+  const months = Object.keys(byMonth);
+  for (let i = 0; i < months.length; i++) {
+    const month = months[i];
+    const intentRows = readHotelIntentRowsForMonth_(ensureHotelIntentSheet_(ss), month);
+    for (let j = 0; j < intentRows.length; j++) {
+      const row = intentRows[j];
+      const key = sanitizeString_(row.userId) + '|' + sanitizeString_(row.workDate);
+      if (!byMonth[month][key]) continue;
+      answered[sanitizeString_(row.userId)] = true;
+    }
+  }
+
+  return answered;
+}
+
+function monthCandidatesForTargetDate_(targetDate) {
+  const ymd = sanitizeString_(targetDate);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return [];
+  const month = ymd.slice(0, 7);
+  return uniq_([addMonthsYm_(month, -1), month, addMonthsYm_(month, 1)]);
+}
+
+function buildSiteMasterExtendedIndex_(siteSheet) {
+  const byName = {};
+  if (!siteSheet) return { byName: byName };
+  const table = readTable_(siteSheet);
+  if (!table.ok || table.values.length <= 1) return { byName: byName };
+
+  const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+  const idxSiteId = indexOfHeader_(headers, ['siteid', 'site_id']);
+  const idxSiteName = indexOfHeader_(headers, ['sitename', 'site_name', 'name']);
+  const idxOpenChat = indexOfHeader_(headers, ['openchaturl', 'open_chat_url']);
+  const idxAliases = indexOfHeader_(headers, ['aliases', 'alias']);
+
+  for (let r = 1; r < table.values.length; r++) {
+    const row = table.values[r];
+    const siteId = idxSiteId >= 0 ? sanitizeString_(row[idxSiteId]) : '';
+    const siteNameNorm = idxSiteName >= 0 ? sanitizeString_(row[idxSiteName]) : '';
+    const openChatUrl = idxOpenChat >= 0 ? sanitizeString_(row[idxOpenChat]) : '';
+    const aliases = idxAliases >= 0 ? sanitizeString_(row[idxAliases]).split(/[|,]/) : [];
+
+    if (!siteId && !siteNameNorm) continue;
+    addSiteExtendedIndexName_(byName, siteNameNorm, siteId, siteNameNorm, openChatUrl);
+    for (let i = 0; i < aliases.length; i++) {
+      addSiteExtendedIndexName_(byName, aliases[i], siteId, siteNameNorm, openChatUrl);
+    }
+  }
+
+  return { byName: byName };
+}
+
+function addSiteExtendedIndexName_(byName, rawName, siteId, siteNameNorm, openChatUrl) {
+  const key = normalizeSiteNameForMatch_(rawName);
+  if (!key) return;
+  if (!byName[key]) {
+    byName[key] = {
+      siteId: sanitizeString_(siteId),
+      siteNameNorm: sanitizeString_(siteNameNorm),
+      openChatUrl: sanitizeString_(openChatUrl)
+    };
+  }
+}
+
+function matchSiteExtended_(siteRaw, siteIndex) {
+  const key = normalizeSiteNameForMatch_(siteRaw);
+  if (!key) return { siteId: '', siteNameNorm: '', openChatUrl: '' };
+  const index = siteIndex && siteIndex.byName ? siteIndex.byName : {};
+  const hit = index[key];
+  if (!hit) return { siteId: '', siteNameNorm: '', openChatUrl: '' };
+  return {
+    siteId: sanitizeString_(hit.siteId),
+    siteNameNorm: sanitizeString_(hit.siteNameNorm),
+    openChatUrl: sanitizeString_(hit.openChatUrl)
+  };
+}
+
+function buildBroadcastId_(targetMonth) {
+  const month = sanitizeString_(targetMonth).replace('-', '');
+  return 'bc-' + month + '-' + Utilities.getUuid().slice(0, 8);
+}
+
+function buildStableIdFromParts_(parts) {
+  const list = Array.isArray(parts) ? parts : [];
+  const text = list.map(function(v) { return sanitizeString_(v); }).join('|');
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8);
+  return bytesToHex_(digest).slice(0, 32);
+}
+
+function findBroadcastLogByOperationId_(sheet, operationId) {
+  const op = sanitizeString_(operationId);
+  if (!op) return { row: 0, status: '', broadcastId: '', preview: null, sentCount: 0, failedCount: 0, skippedCount: 0 };
+  const table = readTable_(sheet);
+  if (!table.ok || table.values.length <= 1) return { row: 0, status: '', broadcastId: '', preview: null, sentCount: 0, failedCount: 0, skippedCount: 0 };
+  const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+  const idxOperationId = indexOfHeader_(headers, ['operationid']);
+  const idxBroadcastId = indexOfHeader_(headers, ['broadcastid']);
+  const idxStatus = indexOfHeader_(headers, ['status']);
+  const idxPreview = indexOfHeader_(headers, ['previewjson']);
+  const idxSent = indexOfHeader_(headers, ['sentcount']);
+  const idxFailed = indexOfHeader_(headers, ['failedcount']);
+  const idxSkipped = indexOfHeader_(headers, ['skippedcount']);
+
+  if (idxOperationId < 0) return { row: 0, status: '', broadcastId: '', preview: null, sentCount: 0, failedCount: 0, skippedCount: 0 };
+  for (let r = table.values.length - 1; r >= 1; r--) {
+    const row = table.values[r];
+    if (sanitizeString_(row[idxOperationId]) !== op) continue;
+    return {
+      row: r + 1,
+      status: idxStatus >= 0 ? sanitizeString_(row[idxStatus]) : '',
+      broadcastId: idxBroadcastId >= 0 ? sanitizeString_(row[idxBroadcastId]) : '',
+      preview: idxPreview >= 0 ? parseJsonSafe_(row[idxPreview]) : null,
+      sentCount: idxSent >= 0 ? Number(row[idxSent] || 0) : 0,
+      failedCount: idxFailed >= 0 ? Number(row[idxFailed] || 0) : 0,
+      skippedCount: idxSkipped >= 0 ? Number(row[idxSkipped] || 0) : 0
+    };
+  }
+
+  return { row: 0, status: '', broadcastId: '', preview: null, sentCount: 0, failedCount: 0, skippedCount: 0 };
+}
+
+function findBroadcastLogByBroadcastId_(sheet, broadcastId) {
+  const id = sanitizeString_(broadcastId);
+  if (!id) return { row: 0, status: '', sentCount: 0, failedCount: 0, skippedCount: 0 };
+  const table = readTable_(sheet);
+  if (!table.ok || table.values.length <= 1) return { row: 0, status: '', sentCount: 0, failedCount: 0, skippedCount: 0 };
+  const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+  const idxBroadcastId = indexOfHeader_(headers, ['broadcastid']);
+  const idxStatus = indexOfHeader_(headers, ['status']);
+  const idxSent = indexOfHeader_(headers, ['sentcount']);
+  const idxFailed = indexOfHeader_(headers, ['failedcount']);
+  const idxSkipped = indexOfHeader_(headers, ['skippedcount']);
+
+  if (idxBroadcastId < 0) return { row: 0, status: '', sentCount: 0, failedCount: 0, skippedCount: 0 };
+  for (let r = table.values.length - 1; r >= 1; r--) {
+    const row = table.values[r];
+    if (sanitizeString_(row[idxBroadcastId]) !== id) continue;
+    return {
+      row: r + 1,
+      status: idxStatus >= 0 ? sanitizeString_(row[idxStatus]) : '',
+      sentCount: idxSent >= 0 ? Number(row[idxSent] || 0) : 0,
+      failedCount: idxFailed >= 0 ? Number(row[idxFailed] || 0) : 0,
+      skippedCount: idxSkipped >= 0 ? Number(row[idxSkipped] || 0) : 0
+    };
+  }
+
+  return { row: 0, status: '', sentCount: 0, failedCount: 0, skippedCount: 0 };
+}
+
+function findApprovalById_(ss, approvalId) {
+  const id = sanitizeString_(approvalId);
+  if (!id) return { sheet: null, row: 0, status: '' };
+
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    const name = sanitizeString_(sheet.getName());
+    if (name.indexOf(SHEET_APPROVAL_QUEUE_PREFIX_) !== 0) continue;
+
+    const table = readTable_(sheet);
+    if (!table.ok || table.values.length <= 1) continue;
+    const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+    const idxApprovalId = indexOfHeader_(headers, ['approvalid']);
+    const idxStatus = indexOfHeader_(headers, ['status']);
+    if (idxApprovalId < 0) continue;
+
+    for (let r = table.values.length - 1; r >= 1; r--) {
+      const row = table.values[r];
+      if (sanitizeString_(row[idxApprovalId]) !== id) continue;
+      return {
+        sheet: sheet,
+        row: r + 1,
+        status: idxStatus >= 0 ? sanitizeString_(row[idxStatus]) : ''
+      };
+    }
+  }
+
+  return { sheet: null, row: 0, status: '' };
+}
+
+function isMonthLocked_(ss, month) {
+  const sheet = ensureMonthlyLockSheet_(ss, month);
+  const lock = findMonthlyLockByMonth_(sheet, month);
+  return lock.row > 0 && sanitizeString_(lock.status).toUpperCase() === 'LOCKED';
+}
+
+function findMonthlyLockByMonth_(sheet, month) {
+  const target = sanitizeString_(month);
+  const table = readTable_(sheet);
+  if (!table.ok || table.values.length <= 1) return { row: 0, status: '', exportFileId: '', exportFileUrl: '' };
+
+  const headers = table.values[0].map(function(h) { return normalizeHeaderKey_(h); });
+  const idxMonth = indexOfHeader_(headers, ['month']);
+  const idxStatus = indexOfHeader_(headers, ['status']);
+  const idxFileId = indexOfHeader_(headers, ['exportfileid']);
+  const idxFileUrl = indexOfHeader_(headers, ['exportfileurl']);
+  if (idxMonth < 0) return { row: 0, status: '', exportFileId: '', exportFileUrl: '' };
+
+  for (let r = table.values.length - 1; r >= 1; r--) {
+    const row = table.values[r];
+    if (sanitizeString_(row[idxMonth]) !== target) continue;
+    return {
+      row: r + 1,
+      status: idxStatus >= 0 ? sanitizeString_(row[idxStatus]) : '',
+      exportFileId: idxFileId >= 0 ? sanitizeString_(row[idxFileId]) : '',
+      exportFileUrl: idxFileUrl >= 0 ? sanitizeString_(row[idxFileUrl]) : ''
+    };
+  }
+  return { row: 0, status: '', exportFileId: '', exportFileUrl: '' };
+}
+
+function appendAuditLog_(ss, input) {
+  const sheet = ensureAuditLogSheet_(ss);
+  const auditId = Utilities.getUuid();
+  const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+  appendRowSanitized_(sheet, [
+    auditId,
+    nowStr,
+    sanitizeString_(input && input.actorType),
+    sanitizeString_(input && input.actorId),
+    sanitizeString_(input && input.actorRole),
+    sanitizeString_(input && input.action),
+    sanitizeString_(input && input.operationId),
+    sanitizeString_(input && input.targetType),
+    sanitizeString_(input && input.targetId),
+    sanitizeString_(input && input.fromState),
+    sanitizeString_(input && input.toState),
+    safeJsonStringify_(input && input.details ? input.details : {}),
+    sanitizeString_(input && input.requestId)
+  ]);
+}
+
+function ensureRoleBindingsSheet_(ss) {
+  let sheet = ss.getSheetByName(SHEET_ROLE_BINDINGS_);
+  if (!sheet) sheet = ss.insertSheet(SHEET_ROLE_BINDINGS_);
+  ensureHeaderRowIfEmpty_(sheet, ['bindingId', 'slackUserId', 'lineUserId', 'email', 'role', 'isActive', 'updatedAt', 'updatedBy']);
+  ensureHeaderColumnsExist_(sheet, ['bindingId', 'slackUserId', 'lineUserId', 'email', 'role', 'isActive', 'updatedAt', 'updatedBy']);
+  return sheet;
+}
+
+function ensureAuditLogSheet_(ss) {
+  let sheet = ss.getSheetByName(SHEET_AUDIT_LOG_);
+  if (!sheet) sheet = ss.insertSheet(SHEET_AUDIT_LOG_);
+  ensureHeaderRowIfEmpty_(sheet, ['auditId', 'timestamp', 'actorType', 'actorId', 'actorRole', 'action', 'operationId', 'targetType', 'targetId', 'fromState', 'toState', 'detailsJson', 'requestId']);
+  ensureHeaderColumnsExist_(sheet, ['auditId', 'timestamp', 'actorType', 'actorId', 'actorRole', 'action', 'operationId', 'targetType', 'targetId', 'fromState', 'toState', 'detailsJson', 'requestId']);
+  return sheet;
+}
+
+function ensureWeekAssignmentsMonthSheet_(ss, month) {
+  const normalized = sanitizeString_(month).replace('-', '_');
+  const name = SHEET_WEEK_ASSIGNMENTS_PREFIX_ + normalized;
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) sheet = ss.insertSheet(name);
+  ensureHeaderRowIfEmpty_(sheet, ['assignmentId', 'broadcastId', 'operationId', 'weekId', 'targetMonth', 'workDate', 'siteId', 'siteName', 'siteRaw', 'role', 'userId', 'lineUserId', 'staffNameRaw', 'dateRangeFrom', 'dateRangeTo', 'openChatUrl', 'status', 'createdAt', 'updatedAt', 'requestId']);
+  ensureHeaderColumnsExist_(sheet, ['assignmentId', 'broadcastId', 'operationId', 'weekId', 'targetMonth', 'workDate', 'siteId', 'siteName', 'siteRaw', 'role', 'userId', 'lineUserId', 'staffNameRaw', 'dateRangeFrom', 'dateRangeTo', 'openChatUrl', 'status', 'createdAt', 'updatedAt', 'requestId']);
+  return sheet;
+}
+
+function ensureBroadcastLogMonthSheet_(ss, month) {
+  const normalized = sanitizeString_(month).replace('-', '_');
+  const name = SHEET_BROADCAST_LOG_PREFIX_ + normalized;
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) sheet = ss.insertSheet(name);
+  ensureHeaderRowIfEmpty_(sheet, ['broadcastId', 'operationId', 'weekId', 'targetMonth', 'status', 'preparedAt', 'sentAt', 'sentCount', 'failedCount', 'skippedCount', 'totalRecipients', 'missingStaffJson', 'missingSiteMasterJson', 'missingOpenChatJson', 'unmatchedNamesJson', 'previewJson', 'rawText', 'requestId', 'updatedAt']);
+  ensureHeaderColumnsExist_(sheet, ['broadcastId', 'operationId', 'weekId', 'targetMonth', 'status', 'preparedAt', 'sentAt', 'sentCount', 'failedCount', 'skippedCount', 'totalRecipients', 'missingStaffJson', 'missingSiteMasterJson', 'missingOpenChatJson', 'unmatchedNamesJson', 'previewJson', 'rawText', 'requestId', 'updatedAt']);
+  return sheet;
+}
+
+function ensureFailedJobsMonthSheet_(ss, month) {
+  const normalized = sanitizeString_(month).replace('-', '_');
+  const name = SHEET_FAILED_JOBS_PREFIX_ + normalized;
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) sheet = ss.insertSheet(name);
+  ensureHeaderRowIfEmpty_(sheet, ['failedJobId', 'broadcastId', 'operationId', 'jobType', 'userId', 'lineUserId', 'siteId', 'role', 'workDate', 'errorCode', 'errorMessage', 'payloadJson', 'status', 'retryCount', 'createdAt', 'updatedAt', 'requestId']);
+  ensureHeaderColumnsExist_(sheet, ['failedJobId', 'broadcastId', 'operationId', 'jobType', 'userId', 'lineUserId', 'siteId', 'role', 'workDate', 'errorCode', 'errorMessage', 'payloadJson', 'status', 'retryCount', 'createdAt', 'updatedAt', 'requestId']);
+  return sheet;
+}
+
+function ensureApprovalQueueMonthSheet_(ss, month) {
+  const normalized = sanitizeString_(month).replace('-', '_');
+  const name = SHEET_APPROVAL_QUEUE_PREFIX_ + normalized;
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) sheet = ss.insertSheet(name);
+  ensureHeaderRowIfEmpty_(sheet, ['approvalId', 'kind', 'targetId', 'status', 'requestedBy', 'reason', 'createdAt', 'decidedAt', 'decidedBy', 'decisionReason', 'updatedAt', 'requestId']);
+  ensureHeaderColumnsExist_(sheet, ['approvalId', 'kind', 'targetId', 'status', 'requestedBy', 'reason', 'createdAt', 'decidedAt', 'decidedBy', 'decisionReason', 'updatedAt', 'requestId']);
+  return sheet;
+}
+
+function ensureMonthlyLockSheet_(ss, month) {
+  const normalized = sanitizeString_(month).replace('-', '_');
+  const name = SHEET_MONTHLY_LOCK_PREFIX_ + normalized;
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) sheet = ss.insertSheet(name);
+  ensureHeaderRowIfEmpty_(sheet, ['month', 'status', 'lockedAt', 'lockedBy', 'exportFileId', 'exportFileUrl', 'requestId', 'updatedAt']);
+  ensureHeaderColumnsExist_(sheet, ['month', 'status', 'lockedAt', 'lockedBy', 'exportFileId', 'exportFileUrl', 'requestId', 'updatedAt']);
+  return sheet;
+}
+
+function parseActionResponsePayload_(output) {
+  try {
+    if (!output || typeof output.getContent !== 'function') return null;
+    return JSON.parse(output.getContent());
+  } catch (err) {
+    return null;
+  }
+}
+
+function parseJsonSafe_(value) {
+  const text = sanitizeString_(value);
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    return null;
+  }
+}
+
+function pushUniqueByKey_(arr, item, keyField) {
+  const list = Array.isArray(arr) ? arr : [];
+  const key = sanitizeString_(item && item[keyField]);
+  if (!key) return;
+  for (let i = 0; i < list.length; i++) {
+    if (sanitizeString_(list[i] && list[i][keyField]) === key) return;
+  }
+  list.push(item);
 }

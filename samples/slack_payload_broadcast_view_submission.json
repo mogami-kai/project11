@@ -1,0 +1,40 @@
+{
+  "type": "view_submission",
+  "team": { "id": "T123" },
+  "user": { "id": "U_SLACK_ADMIN" },
+  "api_app_id": "A123",
+  "token": "deprecated",
+  "trigger_id": "123.456",
+  "view": {
+    "id": "V123",
+    "team_id": "T123",
+    "type": "modal",
+    "callback_id": "broadcast_modal_v7",
+    "hash": "1711111111.abcdef",
+    "state": {
+      "values": {
+        "mode_block": {
+          "mode_action": {
+            "type": "static_select",
+            "selected_option": {
+              "text": { "type": "plain_text", "text": "send" },
+              "value": "send"
+            }
+          }
+        },
+        "target_month_block": {
+          "target_month_action": {
+            "type": "plain_text_input",
+            "value": "2026-03"
+          }
+        },
+        "raw_text_block": {
+          "raw_text_action": {
+            "type": "plain_text_input",
+            "value": "@All 現場A（26日～1日） DL: 山田 太郎 CL: 27日 佐藤 花子→28日 鈴木 一郎→1日 田中 次郎"
+          }
+        }
+      }
+    }
+  }
+}

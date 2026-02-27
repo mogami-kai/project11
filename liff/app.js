@@ -7,7 +7,8 @@ const state = {
   idToken: '',
   profile: null,
   isAdmin: false,
-  lastDashboard: null
+  lastDashboard: null,
+  weekAssignmentsByDate: {}
 };
 
 const el = {
@@ -36,6 +37,7 @@ const el = {
   metricHotelConfirmed: document.getElementById('metricHotelConfirmed'),
   manualForm: document.getElementById('manualForm'),
   manualWorkDate: document.getElementById('manualWorkDate'),
+  manualAssignedSite: document.getElementById('manualAssignedSite'),
   manualFromStation: document.getElementById('manualFromStation'),
   manualToStation: document.getElementById('manualToStation'),
   manualAmount: document.getElementById('manualAmount'),
@@ -43,6 +45,7 @@ const el = {
   manualProject: document.getElementById('manualProject'),
   manualName: document.getElementById('manualName'),
   manualMemo: document.getElementById('manualMemo'),
+  manualOtherSiteHint: document.getElementById('manualOtherSiteHint'),
   manualSubmit: document.getElementById('manualSubmit'),
   ocrExtractForm: document.getElementById('ocrExtractForm'),
   ocrImage: document.getElementById('ocrImage'),
@@ -103,6 +106,7 @@ async function bootstrap() {
   setDefaultDates();
   setMonthlyVisibility(false);
   await initLiffSession();
+  await loadWeekAssignmentsForDate(String(el.manualWorkDate.value || ymdToday()));
   await refreshDashboard();
 }
 
@@ -115,6 +119,8 @@ function bindTabs() {
 function bindForms() {
   el.dashboardRefreshButton.addEventListener('click', refreshDashboard);
   el.manualForm.addEventListener('submit', submitManualTraffic);
+  el.manualWorkDate.addEventListener('change', () => loadWeekAssignmentsForDate(String(el.manualWorkDate.value || '').trim()));
+  el.manualAssignedSite.addEventListener('change', syncManualProjectFromAssignedSite);
   el.ocrExtractForm.addEventListener('submit', runOcrExtract);
   el.ocrDraftForm.addEventListener('submit', submitOcrDraftTraffic);
   el.expenseForm.addEventListener('submit', submitExpense);
@@ -132,6 +138,124 @@ function setDefaultDates() {
   el.draftWorkDate.value = today;
   el.expenseWorkDate.value = today;
   el.monthlyMonth.value = month;
+}
+
+async function loadWeekAssignmentsForDate(targetDate) {
+  const date = String(targetDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+
+  const path = `/api/my/week/assignments?targetDate=${encodeURIComponent(date)}`;
+  try {
+    const result = await callWorkerJson(path, { method: 'GET' });
+    if (!result.body?.ok) {
+      renderAssignedSiteOptions(null, date);
+      return;
+    }
+
+    state.weekAssignmentsByDate[date] = result.body.data || {};
+    renderAssignedSiteOptions(result.body.data || {}, date);
+  } catch (error) {
+    renderAssignedSiteOptions(null, date);
+    renderResponse('GET /api/my/week/assignments', {
+      ok: false,
+      error: {
+        code: 'E_WEEK_ASSIGNMENTS_FETCH',
+        message: String(error?.message || error),
+        details: { targetDate: date },
+        retryable: true
+      },
+      meta: {
+        requestId: '',
+        timestamp: new Date().toISOString()
+      }
+    }, 500);
+  }
+}
+
+function renderAssignedSiteOptions(data, targetDate) {
+  const options = Array.isArray(data?.siteOptions) ? data.siteOptions : [];
+  const currentValue = String(el.manualAssignedSite.value || '').trim();
+  const defaultSiteName = String(data?.defaultAssignment?.siteName || '').trim();
+  const defaultSiteId = String(data?.defaultAssignment?.siteId || '').trim();
+  const defaultKey = defaultSiteId ? `site:${defaultSiteId}` : (defaultSiteName ? `name:${defaultSiteName}` : '');
+
+  el.manualAssignedSite.innerHTML = '';
+
+  if (options.length === 0) {
+    const noAssign = document.createElement('option');
+    noAssign.value = '__OTHER__';
+    noAssign.textContent = 'その他/臨時';
+    noAssign.dataset.isOther = 'true';
+    noAssign.dataset.siteName = '';
+    noAssign.dataset.siteId = '';
+    el.manualAssignedSite.appendChild(noAssign);
+    el.manualAssignedSite.value = '__OTHER__';
+    syncManualProjectFromAssignedSite();
+    return;
+  }
+
+  for (const option of options) {
+    const siteId = String(option?.siteId || '').trim();
+    const siteName = String(option?.siteName || option?.siteRaw || '').trim();
+    if (!siteName) continue;
+
+    const node = document.createElement('option');
+    node.value = siteId ? `site:${siteId}` : `name:${siteName}`;
+    node.textContent = siteName;
+    node.dataset.siteName = siteName;
+    node.dataset.siteId = siteId;
+    node.dataset.openChatUrl = String(option?.openChatUrl || '').trim();
+    node.dataset.isOther = 'false';
+    el.manualAssignedSite.appendChild(node);
+  }
+
+  const otherNode = document.createElement('option');
+  otherNode.value = '__OTHER__';
+  otherNode.textContent = 'その他/臨時';
+  otherNode.dataset.isOther = 'true';
+  otherNode.dataset.siteName = '';
+  otherNode.dataset.siteId = '';
+  el.manualAssignedSite.appendChild(otherNode);
+
+  if (defaultKey && el.manualAssignedSite.querySelector(`option[value=\"${cssEscape(defaultKey)}\"]`)) {
+    el.manualAssignedSite.value = defaultKey;
+  } else if (currentValue && el.manualAssignedSite.querySelector(`option[value=\"${cssEscape(currentValue)}\"]`)) {
+    el.manualAssignedSite.value = currentValue;
+  } else {
+    el.manualAssignedSite.selectedIndex = 0;
+  }
+
+  if (!el.manualWorkDate.value) {
+    el.manualWorkDate.value = targetDate;
+  }
+
+  syncManualProjectFromAssignedSite();
+}
+
+function getSelectedAssignedSite() {
+  const selected = el.manualAssignedSite.selectedOptions && el.manualAssignedSite.selectedOptions[0];
+  if (!selected) return null;
+  return {
+    siteId: String(selected.dataset.siteId || '').trim(),
+    siteName: String(selected.dataset.siteName || '').trim(),
+    openChatUrl: String(selected.dataset.openChatUrl || '').trim(),
+    isOther: String(selected.dataset.isOther || '').trim() === 'true'
+  };
+}
+
+function syncManualProjectFromAssignedSite() {
+  const selected = getSelectedAssignedSite();
+  if (!selected) return;
+
+  if (selected.isOther) {
+    el.manualOtherSiteHint.classList.remove('hidden');
+    return;
+  }
+
+  el.manualOtherSiteHint.classList.add('hidden');
+  if (selected.siteName) {
+    el.manualProject.value = selected.siteName;
+  }
 }
 
 async function initLiffSession() {
@@ -259,6 +383,12 @@ function fillList(node, values) {
 async function submitManualTraffic(event) {
   event.preventDefault();
 
+  const selectedSite = getSelectedAssignedSite();
+  const memoValue = String(el.manualMemo.value || '').trim();
+  const projectValue = selectedSite && selectedSite.siteName && !selectedSite.isOther
+    ? selectedSite.siteName
+    : String(el.manualProject.value || '').trim();
+
   const payload = {
     userId: resolveActiveUserId(),
     workDate: String(el.manualWorkDate.value || '').trim(),
@@ -266,13 +396,16 @@ async function submitManualTraffic(event) {
     toStation: String(el.manualToStation.value || '').trim(),
     amount: Number(el.manualAmount.value || 0),
     roundTrip: String(el.manualRoundTrip.value || '片道').trim(),
-    memo: String(el.manualMemo.value || '').trim(),
-    project: String(el.manualProject.value || '').trim(),
+    memo: memoValue,
+    project: projectValue,
     name: String(el.manualName.value || '').trim(),
     requestId: createRequestId('manual')
   };
 
   const validation = validateTrafficPayload(payload);
+  if (selectedSite && selectedSite.isOther && !memoValue) {
+    validation.push({ field: 'memo', reason: 'required when site is その他/臨時' });
+  }
   if (validation.length > 0) {
     renderValidationError('traffic.validation', validation);
     return;
@@ -598,6 +731,14 @@ function createRequestId(prefix) {
     return `${safePrefix}-${window.crypto.randomUUID()}`;
   }
   return `${safePrefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function cssEscape(value) {
+  const text = String(value || '');
+  if (window.CSS && typeof window.CSS.escape === 'function') {
+    return window.CSS.escape(text);
+  }
+  return text.replace(/["\\]/g, '\\$&');
 }
 
 function readImageAsBase64(file) {
