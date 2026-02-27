@@ -124,13 +124,13 @@ OCR エラーポリシー:
 
 `admin.v7.setup` 実行手順:
 
-- 実行者: `ROLE_BINDINGS` で `ADMIN` ロールを持つ Slack actor（`actorSlackUserId` 必須）。
+- 実行者: リリース担当（GAS `STAFF_TOKEN` を保持する運用者）。
 - 実行タイミング: v7導入時の初期セットアップ時。固定シート作成は原則1回でよい。
 - 実行内容:
   - 固定シート（`ROLE_BINDINGS`, `SETTINGS`, `AUDIT_LOG`, `STAFF_MASTER`, `SITE_MASTER`）を存在保証。
   - `createMonthlyPartitions=true` の場合のみ `targetMonth` 1か月分の月次パーティションを作成（全月自動作成はしない）。
   - `ROLE_BINDINGS` の初期行（seed）は自動作成しない。
-- 必要権限: GAS action `admin.v7.setup` は `ADMIN` ロール必須。
+- 必要権限: GAS Web App 呼び出しに必要な `STAFF_TOKEN` と対象Spreadsheetの編集権限。
 
 月次ファイル運用の入口（現状）:
 

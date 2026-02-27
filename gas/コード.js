@@ -4223,9 +4223,6 @@ function handleMyWeekAssignments_(ss, data, requestId) {
 }
 
 function handleAdminV7Setup_(ss, data, requestId) {
-  const roleCheck = requireAdminRoleForAction_(ss, data, 'ADMIN', requestId, 'admin.v7.setup');
-  if (!roleCheck.ok) return roleCheck.response;
-
   const payload = data && typeof data === 'object' ? data : {};
   const targetMonth = sanitizeString_(payload.targetMonth);
   const createMonthlyPartitions = parseBooleanValue_(payload.createMonthlyPartitions, false);
