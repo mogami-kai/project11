@@ -44,6 +44,7 @@ v5 非破壊条件:
 ## 3. New GAS Actions
 
 - `my.week.assignments`
+- `admin.v7.setup`
 - `admin.role.resolve`
 - `admin.broadcast.preview`
 - `admin.broadcast.send.prepare`
@@ -109,7 +110,34 @@ COREテーブル:
 
 ### 6.2 Security & Ops (Addendum)
 
-- 追記用セクション（既存契約の意味変更なしで加筆する）
+認証運用:
+
+- Slack endpoint（`/api/slack/command`, `/api/slack/events`, `/api/slack/interactive`）は Slack 署名検証（`x-slack-signature`, `x-slack-request-timestamp`）で受け付ける。`x-api-key` は不要。
+- 上記以外の認証対象 endpoint は `x-api-key` または LIFF `idToken`（`Authorization: Bearer ...`）で認証する。
+- `/api/admin/broadcast/*` の非Slack経路は `x-api-key` 認証 + adminチェック（IP許可含む）で受け付ける。
+
+OCR エラーポリシー:
+
+- `GEMINI_API_KEY` 未設定時は `503`（`E_OCR_DISABLED`）を返す。
+- 入力欠落・不正（例: `imageBase64` 欠落、`mimeType` 不正、`workDate` 不正）は `400`（`E_BAD_REQUEST` または `E_VALIDATION`）を返す。
+- OCR失敗時は `502`（`E_OCR_FAILED` など）で返し、Worker はクラッシュさせない。
+
+`admin.v7.setup` 実行手順:
+
+- 実行者: `ROLE_BINDINGS` で `ADMIN` ロールを持つ Slack actor（`actorSlackUserId` 必須）。
+- 実行タイミング: v7導入時の初期セットアップ時。固定シート作成は原則1回でよい。
+- 実行内容:
+  - 固定シート（`ROLE_BINDINGS`, `SETTINGS`, `AUDIT_LOG`, `STAFF_MASTER`, `SITE_MASTER`）を存在保証。
+  - `createMonthlyPartitions=true` の場合のみ `targetMonth` 1か月分の月次パーティションを作成（全月自動作成はしない）。
+  - `ROLE_BINDINGS` の初期行（seed）は自動作成しない。
+- 必要権限: GAS action `admin.v7.setup` は `ADMIN` ロール必須。
+
+月次ファイル運用の入口（現状）:
+
+- 自動実行: 未実装（Workerの `scheduled` は reminder 実行のみ）。
+- 手動実行:
+  - `POST /api/monthly/export` -> GAS `monthly.file.generate`
+  - Slack `/tl monthly close YYYY-MM` -> GAS `admin.monthly.close.export`（内部で `monthly.file.generate` 実行 + `MONTHLY_LOCK_YYYY_MM` 更新）
 
 ## 7. State Rules (v7 Additions)
 

@@ -163,6 +163,7 @@ function doPost(e) {
         return dispatchMonthlyAction_(req.action, ss, req.data, requestId);
 
       // admin
+      case 'admin.v7.setup':
       case 'admin.role.resolve':
       case 'admin.broadcast.preview':
       case 'admin.broadcast.send.prepare':
@@ -300,6 +301,8 @@ function dispatchMonthlyAction_(action, ss, data, requestId) {
 
 function dispatchAdminAction_(action, ss, data, requestId) {
   switch (action) {
+    case 'admin.v7.setup':
+      return handleAdminV7Setup_(ss, data, requestId);
     case 'admin.role.resolve':
       return handleAdminRoleResolve_(ss, data, requestId);
     case 'admin.broadcast.preview':
@@ -4217,6 +4220,186 @@ function handleMyWeekAssignments_(ss, data, requestId) {
     },
     requestId
   );
+}
+
+function handleAdminV7Setup_(ss, data, requestId) {
+  const roleCheck = requireAdminRoleForAction_(ss, data, 'ADMIN', requestId, 'admin.v7.setup');
+  if (!roleCheck.ok) return roleCheck.response;
+
+  const payload = data && typeof data === 'object' ? data : {};
+  const targetMonth = sanitizeString_(payload.targetMonth);
+  const createMonthlyPartitions = parseBooleanValue_(payload.createMonthlyPartitions, false);
+  const fields = [];
+  if (targetMonth && !/^\d{4}-\d{2}$/.test(targetMonth)) {
+    fields.push({ field: 'targetMonth', reason: 'must be YYYY-MM' });
+  }
+  if (createMonthlyPartitions && !targetMonth) {
+    fields.push({ field: 'targetMonth', reason: 'required when createMonthlyPartitions=true' });
+  }
+  if (fields.length) return errorResponse_('E_VALIDATION', 'Validation failed.', { fields }, requestId);
+
+  return withScriptLock_(requestId, function() {
+    const result = {
+      createdSheets: [],
+      existingSheets: [],
+      headersApplied: [],
+      headersSkipped: [],
+      notes: []
+    };
+
+    const fixedSheetSpecs = [
+      {
+        key: 'ROLE_BINDINGS',
+        headers: SHEET_CANONICAL_HEADERS_.ROLE_BINDINGS || [],
+        find: function() { return getSheetByCanonicalOrAlias_(ss, 'ROLE_BINDINGS'); },
+        ensure: function() { return ensureSheetByCanonical_(ss, 'ROLE_BINDINGS'); }
+      },
+      {
+        key: 'SETTINGS',
+        headers: SHEET_CANONICAL_HEADERS_.SETTINGS || [],
+        find: function() { return getSheetByCanonicalOrAlias_(ss, 'SETTINGS'); },
+        ensure: function() { return ensureSheetByCanonical_(ss, 'SETTINGS'); }
+      },
+      {
+        key: 'AUDIT_LOG',
+        headers: SHEET_CANONICAL_HEADERS_.AUDIT_LOG || [],
+        find: function() { return getSheetByCanonicalOrAlias_(ss, 'AUDIT_LOG'); },
+        ensure: function() { return ensureSheetByCanonical_(ss, 'AUDIT_LOG'); }
+      },
+      {
+        key: 'STAFF_MASTER',
+        headers: SHEET_CANONICAL_HEADERS_.STAFF_MASTER || [],
+        find: function() { return getSheetByCanonicalOrAlias_(ss, 'STAFF_MASTER'); },
+        ensure: function() { return ensureSheetByCanonical_(ss, 'STAFF_MASTER'); }
+      },
+      {
+        key: 'SITE_MASTER',
+        headers: SHEET_CANONICAL_HEADERS_.SITE_MASTER || [],
+        find: function() { return getSheetByCanonicalOrAlias_(ss, 'SITE_MASTER'); },
+        ensure: function() { return ensureSheetByCanonical_(ss, 'SITE_MASTER'); }
+      }
+    ];
+
+    for (let i = 0; i < fixedSheetSpecs.length; i++) {
+      applyAdminV7SetupSheetSpec_(fixedSheetSpecs[i], result);
+    }
+
+    if (createMonthlyPartitions) {
+      const normalizedMonth = targetMonth.replace('-', '_');
+      const monthlySheetSpecs = [
+        {
+          key: SHEET_WEEK_ASSIGNMENTS_PREFIX_ + normalizedMonth,
+          headers: ['assignmentId', 'broadcastId', 'operationId', 'weekId', 'targetMonth', 'workDate', 'siteId', 'siteName', 'siteRaw', 'role', 'userId', 'lineUserId', 'staffNameRaw', 'dateRangeFrom', 'dateRangeTo', 'openChatUrl', 'status', 'createdAt', 'updatedAt', 'requestId'],
+          find: function() { return ss.getSheetByName(SHEET_WEEK_ASSIGNMENTS_PREFIX_ + normalizedMonth); },
+          ensure: function() { return ensureMonthlyPartitionSheet_(ss, SHEET_WEEK_ASSIGNMENTS_PREFIX_, targetMonth, ['assignmentId', 'broadcastId', 'operationId', 'weekId', 'targetMonth', 'workDate', 'siteId', 'siteName', 'siteRaw', 'role', 'userId', 'lineUserId', 'staffNameRaw', 'dateRangeFrom', 'dateRangeTo', 'openChatUrl', 'status', 'createdAt', 'updatedAt', 'requestId']); }
+        },
+        {
+          key: SHEET_BROADCAST_LOG_PREFIX_ + normalizedMonth,
+          headers: ['broadcastId', 'operationId', 'weekId', 'targetMonth', 'status', 'preparedAt', 'sentAt', 'sentCount', 'failedCount', 'skippedCount', 'totalRecipients', 'missingStaffJson', 'missingSiteMasterJson', 'missingOpenChatJson', 'unmatchedNamesJson', 'previewJson', 'rawText', 'requestId', 'updatedAt'],
+          find: function() { return ss.getSheetByName(SHEET_BROADCAST_LOG_PREFIX_ + normalizedMonth); },
+          ensure: function() { return ensureMonthlyPartitionSheet_(ss, SHEET_BROADCAST_LOG_PREFIX_, targetMonth, ['broadcastId', 'operationId', 'weekId', 'targetMonth', 'status', 'preparedAt', 'sentAt', 'sentCount', 'failedCount', 'skippedCount', 'totalRecipients', 'missingStaffJson', 'missingSiteMasterJson', 'missingOpenChatJson', 'unmatchedNamesJson', 'previewJson', 'rawText', 'requestId', 'updatedAt']); }
+        },
+        {
+          key: SHEET_FAILED_JOBS_PREFIX_ + normalizedMonth,
+          headers: ['failedJobId', 'broadcastId', 'operationId', 'jobType', 'userId', 'lineUserId', 'siteId', 'role', 'workDate', 'errorCode', 'errorMessage', 'payloadJson', 'status', 'retryCount', 'createdAt', 'updatedAt', 'requestId'],
+          find: function() { return ss.getSheetByName(SHEET_FAILED_JOBS_PREFIX_ + normalizedMonth); },
+          ensure: function() { return ensureMonthlyPartitionSheet_(ss, SHEET_FAILED_JOBS_PREFIX_, targetMonth, ['failedJobId', 'broadcastId', 'operationId', 'jobType', 'userId', 'lineUserId', 'siteId', 'role', 'workDate', 'errorCode', 'errorMessage', 'payloadJson', 'status', 'retryCount', 'createdAt', 'updatedAt', 'requestId']); }
+        },
+        {
+          key: SHEET_APPROVAL_QUEUE_PREFIX_ + normalizedMonth,
+          headers: ['approvalId', 'kind', 'targetId', 'status', 'requestedBy', 'reason', 'createdAt', 'decidedAt', 'decidedBy', 'decisionReason', 'updatedAt', 'requestId'],
+          find: function() { return ss.getSheetByName(SHEET_APPROVAL_QUEUE_PREFIX_ + normalizedMonth); },
+          ensure: function() { return ensureMonthlyPartitionSheet_(ss, SHEET_APPROVAL_QUEUE_PREFIX_, targetMonth, ['approvalId', 'kind', 'targetId', 'status', 'requestedBy', 'reason', 'createdAt', 'decidedAt', 'decidedBy', 'decisionReason', 'updatedAt', 'requestId']); }
+        },
+        {
+          key: SHEET_MONTHLY_LOCK_PREFIX_ + normalizedMonth,
+          headers: ['month', 'status', 'lockedAt', 'lockedBy', 'exportFileId', 'exportFileUrl', 'requestId', 'updatedAt'],
+          find: function() { return ss.getSheetByName(SHEET_MONTHLY_LOCK_PREFIX_ + normalizedMonth); },
+          ensure: function() { return ensureMonthlyPartitionSheet_(ss, SHEET_MONTHLY_LOCK_PREFIX_, targetMonth, ['month', 'status', 'lockedAt', 'lockedBy', 'exportFileId', 'exportFileUrl', 'requestId', 'updatedAt']); }
+        }
+      ];
+
+      for (let j = 0; j < monthlySheetSpecs.length; j++) {
+        applyAdminV7SetupSheetSpec_(monthlySheetSpecs[j], result);
+      }
+      result.notes.push('Monthly partition sheets were processed only for targetMonth=' + targetMonth + '.');
+    } else {
+      result.notes.push('Monthly partition sheet creation skipped (createMonthlyPartitions=false).');
+    }
+
+    result.notes.push('ROLE_BINDINGS seed row is not created automatically by admin.v7.setup.');
+
+    return okResponse_(result, requestId);
+  });
+}
+
+function applyAdminV7SetupSheetSpec_(spec, result) {
+  const setupSpec = spec && typeof spec === 'object' ? spec : {};
+  const existing = typeof setupSpec.find === 'function' ? setupSpec.find() : null;
+  const expectedHeaders = Array.isArray(setupSpec.headers) ? setupSpec.headers : [];
+  const fallbackName = sanitizeString_(setupSpec.key);
+
+  if (!existing) {
+    const created = typeof setupSpec.ensure === 'function' ? setupSpec.ensure() : null;
+    const createdName = created && typeof created.getName === 'function'
+      ? sanitizeString_(created.getName())
+      : fallbackName;
+    if (createdName) {
+      pushUniqueAdminV7SetupValue_(result.createdSheets, createdName);
+      pushUniqueAdminV7SetupValue_(result.headersApplied, createdName);
+    }
+    return;
+  }
+
+  const existingName = sanitizeString_(existing.getName()) || fallbackName;
+  if (existingName) pushUniqueAdminV7SetupValue_(result.existingSheets, existingName);
+
+  if (isSheetHeaderWritableForAdminV7Setup_(existing)) {
+    const ensured = typeof setupSpec.ensure === 'function' ? setupSpec.ensure() : existing;
+    const ensuredName = ensured && typeof ensured.getName === 'function'
+      ? sanitizeString_(ensured.getName())
+      : existingName;
+    if (ensuredName) pushUniqueAdminV7SetupValue_(result.headersApplied, ensuredName);
+    return;
+  }
+
+  const missingHeaders = collectMissingHeadersForAdminV7Setup_(existing, expectedHeaders);
+  result.headersSkipped.push({
+    sheetName: existingName || fallbackName,
+    reason: 'existing_sheet_non_empty',
+    missingHeaders: missingHeaders
+  });
+}
+
+function isSheetHeaderWritableForAdminV7Setup_(sheet) {
+  if (!sheet) return false;
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 1 && lastCol < 1) return true;
+  if (lastRow < 1) return true;
+  if (lastRow > 1) return false;
+  const readWidth = Math.max(lastCol, 1);
+  const firstRow = sheet.getRange(1, 1, 1, readWidth).getValues()[0];
+  const hasValue = firstRow.some(function(v) { return sanitizeString_(v) !== ''; });
+  return !hasValue;
+}
+
+function collectMissingHeadersForAdminV7Setup_(sheet, expectedHeaders) {
+  if (!sheet || !Array.isArray(expectedHeaders) || expectedHeaders.length === 0) return [];
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return expectedHeaders.slice();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return normalizeHeaderKey_(h); });
+  return expectedHeaders.filter(function(name) {
+    return indexOfHeader_(headers, [normalizeHeaderKey_(name)]) < 0;
+  });
+}
+
+function pushUniqueAdminV7SetupValue_(arr, value) {
+  const list = Array.isArray(arr) ? arr : [];
+  const text = sanitizeString_(value);
+  if (!text) return;
+  if (list.indexOf(text) >= 0) return;
+  list.push(text);
 }
 
 function handleAdminRoleResolve_(ss, data, requestId) {
