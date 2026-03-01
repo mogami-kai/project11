@@ -111,7 +111,7 @@ If none: `SECTION C: None`
 Rules (applied in order, first match wins):
 
 1. If any `Required(Prod)=Yes` variable is absent or empty → **BLOCK**
-2. If `ADMIN_ALLOWED_IPS` is absent or empty → **BLOCK** (ops_rules §6 normative override)
+2. If admin routes are enabled AND (`CF_ACCESS_TEAM_DOMAIN` is absent or empty OR `CF_ACCESS_AUD` is absent or empty) → **BLOCK** (ops_rules §6 normative override)
 3. If any SECTION A missing variable has `Required(Prod)=Yes` status in source → **BLOCK**
 4. If any SECTION C conditional violation involves an unset variable → **BLOCK**
 5. If all required variables are present and all BLOCK conditions are clear → **ALLOW**
@@ -130,7 +130,10 @@ BLOCKING_VARS: <comma-separated list, or "none">
 - No soft warnings. Every finding is either BLOCK or a documented informational note.
 - Do not infer values. Only report what is observable in source files.
 - Do not check runtime values. Only check presence/absence of configuration.
-- `ADMIN_ALLOWED_IPS` must always be explicitly verified. Any doubt → BLOCK.
+- When admin routes are enabled, `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` must always be explicitly verified. Any doubt → BLOCK.
+- `ADMIN_ALLOWED_IPS` is optional (defense-in-depth). Its absence is NOT a BLOCK condition.
+- `LIFF_HOTEL_URL` is **deprecated and not required**. Its absence is NOT a BLOCK condition. Hotel flow is message-based (LINE push + Yes/No buttons); do NOT require a hotel LIFF URL.
+- **Hotel consistency check**: If ENVIRONMENT.md §4.9 states hotel is message-based, the audit must NOT flag `LIFF_HOTEL_URL` absence as a violation. Any audit rule that would BLOCK on missing `LIFF_HOTEL_URL` is itself invalid.
 - If ENVIRONMENT.md itself cannot be read → BLOCK with reason `SPEC_UNREADABLE`.
 - If source files cannot be read → BLOCK with reason `SOURCE_UNREADABLE`.
 
@@ -142,7 +145,6 @@ The following variables must be present and non-empty for production deployment 
 
 **Worker:**
 - `ALLOWED_ORIGINS`
-- `ADMIN_ALLOWED_IPS` (**normative BLOCK**)
 - `GAS_ENDPOINT`
 - `STAFF_TOKEN_FOR_GAS`
 - `LINE_CHANNEL_SECRET`
@@ -152,11 +154,20 @@ The following variables must be present and non-empty for production deployment 
 - `LIFF_REGISTER_URL`
 - `LIFF_TRAFFIC_URL`
 - `LIFF_EXPENSE_URL`
-- `LIFF_HOTEL_URL`
 - `WORKER_API_KEY`
 - `LINE_ADMIN_USER_IDS`
 - `IDEMPOTENCY_KV` (binding)
 - `IDEMPOTENCY_LOCK` (binding)
+
+**Worker — Conditional Required (admin routes enabled, normative BLOCK per ops_rules §6):**
+- `CF_ACCESS_TEAM_DOMAIN`
+- `CF_ACCESS_AUD`
+
+**Worker — Optional (defense-in-depth, not required):**
+- `ADMIN_ALLOWED_IPS`
+
+**Worker — Deprecated (not required; retained in code only):**
+- `LIFF_HOTEL_URL` — hotel flow is message-based; no LIFF URL required (see ENVIRONMENT.md §4.9)
 
 **GAS Script Properties:**
 - `SPREADSHEET_ID`
