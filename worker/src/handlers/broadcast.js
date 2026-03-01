@@ -174,7 +174,26 @@ export async function handleAdminBroadcastSend(request, env, meta, requestId) {
     }
 
     const recipients = Array.isArray(preparedData.recipients) ? preparedData.recipients : [];
-    const { pushed, failed, deliveries } = await executeBroadcastDelivery(env, recipients, requestId, { includeRecipientMeta: true });
+
+    // [P0-1] check KV for recipients already sent in a previous run of this operation
+    const alreadySentIds = new Set();
+    const kv = env?.IDEMPOTENCY_KV;
+    if (operationId && kv) {
+      for (const rec of recipients) {
+        const recId = String(rec?.recipientId || '').trim();
+        if (!recId) continue;
+        try {
+          const val = await kv.get(`broadcast:sent:${operationId}:${recId}`);
+          if (val) alreadySentIds.add(recId);
+        } catch { /* ignore */ }
+      }
+    }
+
+    const { pushed, failed, alreadySent, deliveries } = await executeBroadcastDelivery(env, recipients, requestId, {
+      includeRecipientMeta: true,
+      operationId, // [P0-1]
+      alreadySentIds // [P0-1]
+    });
     let skipped = 0;
 
     if (recipients.length === 0) {
@@ -197,6 +216,7 @@ export async function handleAdminBroadcastSend(request, env, meta, requestId) {
             pushed,
             failed,
             skipped,
+            alreadySent, // [P0-1]
             deliveries
           }
         }
