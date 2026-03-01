@@ -22,7 +22,7 @@ export async function handleReminderPush(request, env, meta, requestId) {
   });
   if (!auth.ok) return auth.response;
 
-  const adminCheck = requireAdmin(request, env, meta, { requireIpAllow: true });
+  const adminCheck = requireAdmin(request, env, meta);
   if (!adminCheck.ok) return adminCheck.response;
 
   let body = {};

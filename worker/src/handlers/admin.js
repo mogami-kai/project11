@@ -242,7 +242,8 @@ function isValidUrl(value) {
 
 function isAdminIpAllowed(request, env) {
   const allowRaw = String(env.ADMIN_ALLOWED_IPS || '').trim();
-  if (!allowRaw) return false;
+  // Gate0.9: ADMIN_ALLOWED_IPS is optional defense-in-depth; CF Access is primary
+  if (!allowRaw) return true;
 
   const currentIp = String(request.headers.get('cf-connecting-ip') || '').trim();
   if (!currentIp) return false;

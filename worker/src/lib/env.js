@@ -45,6 +45,11 @@ const ROUTE_ENV_REQUIREMENTS = [
   {
     match: (path) => path === '/api/slack/command' || path === '/api/slack/events' || path === '/api/slack/interactive',
     required: ['SLACK_SIGNING_SECRET']
+  },
+  {
+    // Gate0.9: CF Access is required for all /api/admin/* routes
+    match: (path) => path.startsWith('/api/admin/'),
+    required: ['CF_ACCESS_TEAM_DOMAIN', 'CF_ACCESS_AUD']
   }
 ];
 

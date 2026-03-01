@@ -1,6 +1,137 @@
 import { callGas } from '../clients/gas.js';
 import { buildError, fail } from './response.js';
 
+// --- Cloudflare Access JWT verification (Gate0.9) ---
+// Module-scope JWKS cache; 5-minute TTL avoids repeated JWKS fetches per isolate
+let _cfJwksCache = null;
+let _cfJwksCacheTime = 0;
+const CF_JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function b64urlDecode_(str) {
+  const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
+  return atob(padded);
+}
+
+function b64urlToBytes_(str) {
+  const raw = b64urlDecode_(str);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+
+function getCfAccessJwt_(request) {
+  return String(request.headers.get('CF-Access-Jwt-Assertion') || '').trim();
+}
+
+async function verifyCfAccessJwt_(jwt, env) {
+  const teamDomain = String(env.CF_ACCESS_TEAM_DOMAIN || '').trim();
+  const expectedAud = String(env.CF_ACCESS_AUD || '').trim();
+  if (!teamDomain || !expectedAud) return { ok: false, reason: 'missing_cf_access_config' };
+
+  const parts = jwt.split('.');
+  if (parts.length !== 3) return { ok: false, reason: 'invalid_jwt_format' };
+
+  let header, payload;
+  try {
+    header = JSON.parse(b64urlDecode_(parts[0]));
+    payload = JSON.parse(b64urlDecode_(parts[1]));
+  } catch {
+    return { ok: false, reason: 'invalid_jwt_parse' };
+  }
+
+  // exp validation
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (!payload.exp || payload.exp < nowSec) return { ok: false, reason: 'jwt_expired' };
+
+  // aud validation (aud may be string or array per RFC 7519)
+  const aud = payload.aud;
+  const audMatch = Array.isArray(aud) ? aud.includes(expectedAud) : aud === expectedAud;
+  if (!audMatch) return { ok: false, reason: 'aud_mismatch' };
+
+  // algorithm check — Cloudflare Access uses RS256
+  const alg = String(header.alg || '').trim();
+  if (alg !== 'RS256') return { ok: false, reason: 'unsupported_alg' };
+
+  // JWKS fetch with module-scope cache
+  const jwksUrl = `https://${teamDomain}.cloudflareaccess.com/cdn-cgi/access/certs`;
+  let jwks;
+  const nowMs = Date.now();
+  if (_cfJwksCache && nowMs - _cfJwksCacheTime < CF_JWKS_CACHE_TTL_MS) {
+    jwks = _cfJwksCache;
+  } else {
+    try {
+      const resp = await fetch(jwksUrl);
+      if (!resp.ok) return { ok: false, reason: 'jwks_fetch_failed' };
+      jwks = await resp.json();
+      _cfJwksCache = jwks;
+      _cfJwksCacheTime = nowMs;
+    } catch {
+      return { ok: false, reason: 'jwks_fetch_error' };
+    }
+  }
+
+  // key selection by kid
+  const kid = String(header.kid || '').trim();
+  const keys = Array.isArray(jwks?.keys) ? jwks.keys : [];
+  const jwkKey = kid ? keys.find((k) => k.kid === kid) : keys[0];
+  if (!jwkKey) return { ok: false, reason: 'jwks_key_not_found' };
+
+  // RS256 signature verification via WebCrypto
+  try {
+    const cryptoKey = await crypto.subtle.importKey(
+      'jwk',
+      jwkKey,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+    const valid = await crypto.subtle.verify(
+      'RSASSA-PKCS1-v1_5',
+      cryptoKey,
+      b64urlToBytes_(parts[2]),
+      new TextEncoder().encode(`${parts[0]}.${parts[1]}`)
+    );
+    if (!valid) return { ok: false, reason: 'invalid_signature' };
+  } catch {
+    return { ok: false, reason: 'signature_verify_error' };
+  }
+
+  return { ok: true };
+}
+
+export async function requireCfAccessJwt(request, env, meta) {
+  const jwt = getCfAccessJwt_(request);
+  if (!jwt) {
+    return {
+      ok: false,
+      response: fail(
+        buildError('E_UNAUTHORIZED', 'CF Access JWT required.', { reason: 'missing_cf_access_jwt' }, false),
+        meta,
+        { status: 401 }
+      )
+    };
+  }
+  const result = await verifyCfAccessJwt_(jwt, env);
+  if (!result.ok) {
+    const isAudMismatch = result.reason === 'aud_mismatch';
+    return {
+      ok: false,
+      response: fail(
+        buildError(
+          isAudMismatch ? 'E_FORBIDDEN' : 'E_UNAUTHORIZED',
+          isAudMismatch ? 'CF Access token not authorized for this application.' : 'CF Access JWT verification failed.',
+          { reason: result.reason },
+          false
+        ),
+        meta,
+        { status: isAudMismatch ? 403 : 401 }
+      )
+    };
+  }
+  return { ok: true };
+}
+
 export const REQUIRED_REGISTRATION_FIELDS = [
   'nameKanji',
   'nameKana',

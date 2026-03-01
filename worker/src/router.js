@@ -1,4 +1,5 @@
 import { parseAllowedOrigins, validateEnvForRequest, validateEnvForScheduled } from './lib/env.js';
+import { requireCfAccessJwt } from './lib/access.js';
 import { buildError, createMeta, createResponder } from './lib/response.js';
 import { handleAdminShiftRawRecent, handleDebugAuth, handleDebugEnv, handleDebugFingerprint, handleDebugGas, handleDebugLineBotInfo, handleDebugRoutes } from './handlers/admin.js';
 import { handleAdminBroadcastPreview, handleAdminBroadcastRetryFailed, handleAdminBroadcastSend } from './handlers/broadcast.js';
@@ -91,6 +92,12 @@ export async function routeFetch(request, env, ctx) {
       buildError('E_CONFIG', 'Missing required environment variables.', { missing: envValidation.missing }, false),
       { status: 500 }
     );
+  }
+
+  // Gate0.9: Cloudflare Access JWT is required for all /api/admin/* routes
+  if (path.startsWith('/api/admin/')) {
+    const cfCheck = await requireCfAccessJwt(request, env, meta);
+    if (!cfCheck.ok) return responder.withCors(cfCheck.response);
   }
 
   try {
