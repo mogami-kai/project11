@@ -59,19 +59,14 @@ export async function handleLineWebhook(request, env, meta, requestId, origin, a
   }
 
   const events = extractWebhookEvents(bodyJson);
-  const task = processLineEvents(events, env, requestId);
-
-  if (ctx && typeof ctx.waitUntil === 'function') {
-    ctx.waitUntil(task);
-    return ack({ accepted: true, queued: true, eventCount: events.length });
+  // [P0-5] 同期処理: 失敗時は 500 で返して LINE 再送を許可
+  const result = await processLineEvents(events, env, requestId);
+  if (!result.ok) {
+    safeLog('line.webhook', { requestId, reason: 'processing_failed', eventCount: events.length });
+    const res = fail(buildError('E_UPSTREAM', 'Event processing failed. Retry expected.', {}, true), meta, { status: 500 });
+    return withCorsHeaders(res, origin, allowedOrigin, requestId);
   }
-
-  try {
-    await task;
-  } catch (error) {
-    safeLog('line.webhook', { requestId, reason: 'process_failed', message: String(error?.message || error) });
-  }
-  return ack({ accepted: true, queued: false, eventCount: events.length });
+  return ack({ accepted: true, eventCount: events.length });
 }
 
 async function processLineEvents(events, env, requestId) {
@@ -87,8 +82,11 @@ async function processLineEvents(events, env, requestId) {
       continue;
     }
 
-    await processSingleLineEventSafely(event, env, requestId);
+    // [P0-5] 成功後に KV 記録。失敗時は false を返して 500 へ
+    const eventOk = await processSingleLineEventTracked(event, env, requestId, replayGuard.storeKey);
+    if (!eventOk) return { ok: false };
   }
+  return { ok: true };
 }
 
 async function processSingleLineEventSafely(event, env, requestId) {
@@ -101,6 +99,23 @@ async function processSingleLineEventSafely(event, env, requestId) {
       reason: 'event_failed',
       message: String(error?.message || error)
     });
+  }
+}
+
+// [P0-5] 処理成功後にのみ KV へ記録し、失敗時は false を返す
+async function processSingleLineEventTracked(event, env, requestId, storeKey) {
+  try {
+    await processSingleLineEvent(event, env, requestId);
+    await recordWebhookEventProcessed(env, storeKey, requestId);
+    return true;
+  } catch (error) {
+    safeLog('line.event', {
+      requestId,
+      type: String(event?.type || ''),
+      reason: 'event_failed',
+      message: String(error?.message || error)
+    });
+    return false;
   }
 }
 
@@ -568,6 +583,18 @@ function buildRegisterGuideText(registerUrl) {
   return lines.join('\n');
 }
 
+// [P0-5] 成功後に KV / メモリキャッシュへ記録（事前予約の廃止に対応）
+async function recordWebhookEventProcessed(env, storeKey, requestId) {
+  if (!storeKey) return;
+  const ttlSeconds = parseWebhookReplayTtlSeconds(env);
+  const kv = env?.IDEMPOTENCY_KV;
+  if (kv) {
+    await kv.put(storeKey, requestId, { expirationTtl: ttlSeconds });
+    return;
+  }
+  WEBHOOK_EVENT_MEMORY_CACHE.set(storeKey, Date.now() + ttlSeconds * 1000);
+}
+
 function parseWebhookReplayTtlSeconds(env) {
   const raw = Number(env?.WEBHOOK_EVENT_TTL_SECONDS);
   if (!Number.isFinite(raw) || raw <= 0) return 86400;
@@ -596,7 +623,7 @@ function cleanupWebhookMemoryCache() {
 async function reserveWebhookEventForProcessing(event, env, requestId) {
   const { eventId, eventTimestampMs, storeKey } = resolveWebhookEventIdentity(event);
   if (!storeKey) {
-    return { processable: true, reason: 'no_event_id', eventId: '', eventTimestampMs: 0 };
+    return { processable: true, reason: 'no_event_id', eventId: '', eventTimestampMs: 0, storeKey: '' };
   }
 
   const ttlSeconds = parseWebhookReplayTtlSeconds(env);
@@ -618,8 +645,7 @@ async function reserveWebhookEventForProcessing(event, env, requestId) {
       if (exists) {
         return { processable: false, reason: 'duplicate_event', eventId, eventTimestampMs };
       }
-      await kv.put(storeKey, requestId, { expirationTtl: ttlSeconds });
-      return { processable: true, reason: 'reserved', eventId, eventTimestampMs };
+      return { processable: true, reason: 'new', eventId, eventTimestampMs, storeKey };
     }
 
     cleanupWebhookMemoryCache();
@@ -627,8 +653,7 @@ async function reserveWebhookEventForProcessing(event, env, requestId) {
     if (Number.isFinite(expiresAtMs) && expiresAtMs > now) {
       return { processable: false, reason: 'duplicate_event', eventId, eventTimestampMs };
     }
-    WEBHOOK_EVENT_MEMORY_CACHE.set(storeKey, now + ttlSeconds * 1000);
-    return { processable: true, reason: 'reserved', eventId, eventTimestampMs };
+    return { processable: true, reason: 'new', eventId, eventTimestampMs, storeKey };
   } finally {
     await releaseLock(env, lockPath, storeKey);
   }
