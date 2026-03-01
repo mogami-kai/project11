@@ -36,6 +36,7 @@ const SHEET_AUDIT_LOG_ = 'AUDIT_LOG';
 const SHEET_WEEK_ASSIGNMENTS_PREFIX_ = 'WEEK_ASSIGNMENTS_';
 const SHEET_BROADCAST_LOG_PREFIX_ = 'BROADCAST_LOG_';
 const SHEET_FAILED_JOBS_PREFIX_ = 'FAILED_JOBS_';
+const SHEET_BROADCAST_LOG_RECIPIENTS_PREFIX_ = 'BROADCAST_LOG_RECIPIENTS_'; // [P0-1]
 const SHEET_APPROVAL_QUEUE_PREFIX_ = 'APPROVAL_QUEUE_';
 const SHEET_MONTHLY_LOCK_PREFIX_ = 'MONTHLY_LOCK_';
 const SHIFT_RAW_PARSER_VERSION_ = 'shift_raw_v1';
@@ -292,8 +293,13 @@ function dispatchOpsAction_(action, ss, data, requestId) {
 
 function dispatchMonthlyAction_(action, ss, data, requestId) {
   switch (action) {
-    case 'monthly.file.generate':
+    case 'monthly.file.generate': {
+      // [P0-4] 直接呼び出しはロック検証必須（admin.monthly.close.export 経由は除外）
+      const month = sanitizeString_(data && data.month);
+      const monthlyLockErr = assertMonthWritable_(ss, month, requestId);
+      if (monthlyLockErr) return monthlyLockErr;
       return handleMonthlyFileGenerate_(ss, data, requestId);
+    }
     default:
       return unsupportedActionResponse_(action, requestId);
   }
@@ -342,6 +348,10 @@ function handleTrafficCreate_(ss, data, requestId) {
   }
   return withScriptLock_(requestId, function() {
     try {
+      // [P0-3] actor 検証（dedup より前：actor 不一致は既存 requestId でも拒否）
+      const trafficActorErr = assertSubmitActorValid_(ss, sanitizeString_(data && data.userId), sanitizeString_(data && data.lineUserId), requestId);
+      if (trafficActorErr) return trafficActorErr;
+
       const sheet = ss.getSheetByName(SHEET_TRAFFIC_);
       if (!sheet) return errorResponse_('E_SHEET_NOT_FOUND', 'Sheet TRAFFIC_LOG not found.', {}, requestId);
 
@@ -357,6 +367,11 @@ function handleTrafficCreate_(ss, data, requestId) {
         Logger.log('traffic.create dedup hit(scan): requestId=' + requestId + ', row=' + existingRow);
         return okResponse_({ id: requestId, row: existingRow, dedup: true }, requestId);
       }
+
+      // [P0-4] dedup 後・書込み前にロック検証（新規書込みのみ対象）
+      const trafficMonth = sanitizeString_(data && data.workDate).slice(0, 7);
+      const trafficLockErr = assertMonthWritable_(ss, trafficMonth, requestId);
+      if (trafficLockErr) return trafficLockErr;
 
       const memoWithRequestId = buildTrafficMemoWithRequestId_(sanitizeString_(data.memo), requestId);
       // [P12] Date 書き込みはフォーマット済み文字列で
@@ -2052,6 +2067,15 @@ function handleHotelIntentSubmit_(ss, data, requestId) {
   if (fields.length) return errorResponse_('E_VALIDATION', 'Validation failed.', { fields }, requestId);
 
   return withScriptLock_(requestId, function() {
+    // [P0-3] actor 検証（lock 判定より前）
+    const hotelActorErr = assertSubmitActorValid_(ss, sanitizeString_(data && data.userId), sanitizeString_(data && data.lineUserId), requestId);
+    if (hotelActorErr) return hotelActorErr;
+
+    // [P0-4] 書込み前にロック検証（upsert も対象）
+    const hotelMonth = sanitizeString_(data && data.workDate).slice(0, 7);
+    const hotelLockErr = assertMonthWritable_(ss, hotelMonth, requestId);
+    if (hotelLockErr) return hotelLockErr;
+
     const sheet  = ensureHotelIntentSheet_(ss);
     const table  = readTable_(sheet);
     const idx    = table.idx;
@@ -3864,6 +3888,10 @@ function handleExpenseCreate_(ss, data, requestId) {
 
   return withScriptLock_(requestId, function() {
     try {
+      // [P0-3] actor 検証（dedup より前：actor 不一致は既存 requestId でも拒否）
+      const expenseActorErr = assertSubmitActorValid_(ss, sanitizeString_(data && data.userId), sanitizeString_(data && data.lineUserId), requestId);
+      if (expenseActorErr) return expenseActorErr;
+
       const sheet = ensureExpenseLogSheet_(ss);
       // requestId キーで重複排除
       const existingRow = findExpenseRowByRequestId_(sheet, requestId);
@@ -3871,6 +3899,12 @@ function handleExpenseCreate_(ss, data, requestId) {
         Logger.log('expense.create dedup: requestId=' + requestId + ', row=' + existingRow);
         return okResponse_({ expenseId: requestId, row: existingRow, dedup: true }, requestId);
       }
+
+      // [P0-4] dedup 後・書込み前にロック検証（新規書込みのみ対象）
+      const expenseMonth = sanitizeString_(data && data.workDate).slice(0, 7);
+      const expenseLockErr = assertMonthWritable_(ss, expenseMonth, requestId);
+      if (expenseLockErr) return expenseLockErr;
+
       const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss'); // [P12]
       appendRowSanitized_(sheet, [
         nowStr, userId, name, project, workDate, category,
@@ -4542,12 +4576,9 @@ function handleAdminBroadcastSendPrepare_(ss, data, requestId) {
   if (fields.length) return errorResponse_('E_VALIDATION', 'Validation failed.', { fields }, requestId);
 
   return withScriptLock_(requestId, function() {
-    if (isMonthLocked_(ss, targetMonth)) {
-      return errorResponse_('E_MONTH_LOCKED', 'Target month is locked. Post-lock changes must be recorded as adjustment in next month.', {
-        month: targetMonth,
-        adjustmentMonth: addMonthsYm_(targetMonth, 1)
-      }, requestId, false);
-    }
+    // [P0-4] fail-close: シート欠損も LOCKED も CLOSING も拒否
+    const broadcastLockErr = assertMonthWritable_(ss, targetMonth, requestId);
+    if (broadcastLockErr) return broadcastLockErr;
 
     const logSheet = ensureBroadcastLogMonthSheet_(ss, targetMonth);
     const existing = findBroadcastLogByOperationId_(logSheet, operationId);
@@ -4587,7 +4618,7 @@ function handleAdminBroadcastSendPrepare_(ss, data, requestId) {
       return errorResponse_(persisted.code || 'E_APPEND_FAILED', persisted.message || 'Failed to persist assignments.', persisted.details || {}, requestId, true);
     }
 
-    const recipients = buildBroadcastRecipientsFromRecords_(parsed.records);
+    const recipients = buildBroadcastRecipientsFromRecords_(parsed.records, broadcastId); // [P0-1] pass broadcastId for recipientId
     const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
     const previewPayload = {
       weekId: parsed.weekId,
@@ -4701,8 +4732,37 @@ function handleAdminBroadcastSendFinalize_(ss, data, requestId) {
     const pushed = Number(delivery.pushed || 0);
     const failed = Number(delivery.failed || 0);
     const skipped = Number(delivery.skipped || 0);
+    const alreadySent = Number(delivery.alreadySent || 0); // [P0-1] already sent in previous run
     const finalStatus = failed > 0 ? 'PARTIAL' : 'SENT';
     const nowStr = Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd HH:mm:ss');
+
+    // [P0-1] write per-recipient delivery log to BROADCAST_LOG_RECIPIENTS
+    const recipientSheet = ensureBroadcastLogRecipientsSheet_(ss, targetMonth);
+    const deliveryItems = Array.isArray(deliveries) ? deliveries : [];
+    for (let i = 0; i < deliveryItems.length; i++) {
+      const d = deliveryItems[i];
+      const recId = sanitizeString_(d && d.recipientId);
+      if (!recId) continue;
+      const dStatus = sanitizeString_(d && d.status);
+      const isSent = dStatus === 'sent' || dStatus === 'already_sent';
+      upsertSheetRowById_(recipientSheet, 'recipientId', recId, {
+        recipientId: recId,
+        broadcastId: broadcastId,
+        operationId: operationId,
+        targetMonth: targetMonth,
+        userId: sanitizeString_(d && d.userId),
+        lineUserId: sanitizeString_(d && d.lineUserId),
+        siteId: sanitizeString_(d && d.siteId),
+        role: sanitizeString_(d && d.role),
+        workDate: sanitizeString_(d && d.workDate),
+        sent: isSent,
+        sentAt: isSent ? nowStr : '',
+        errorCode: sanitizeString_(d && d.errorCode),
+        createdAt: nowStr,
+        updatedAt: nowStr,
+        requestId: requestId
+      });
+    }
 
     const failedJobStats = persistFailedJobsFromDeliveries_(ss, targetMonth, {
       broadcastId,
@@ -4714,7 +4774,7 @@ function handleAdminBroadcastSendFinalize_(ss, data, requestId) {
     const patch = {
       status: finalStatus,
       sentAt: nowStr,
-      sentCount: pushed,
+      sentCount: pushed + alreadySent, // [P0-1] total sent across all runs
       failedCount: failed,
       skippedCount: skipped,
       updatedAt: nowStr,
@@ -5584,18 +5644,24 @@ function persistWeekAssignmentsFromBroadcast_(ss, input) {
   return { ok: true, insertedRows: insertedRows };
 }
 
-function buildBroadcastRecipientsFromRecords_(records) {
+function buildBroadcastRecipientsFromRecords_(records, broadcastId) {
   const src = Array.isArray(records) ? records : [];
+  const bid = sanitizeString_(broadcastId);
   return src.map(function(rec) {
+    const userId = sanitizeString_(rec.userId);
+    const siteKey = sanitizeString_(rec.siteId) || sanitizeString_(rec.siteRaw);
+    const role = sanitizeString_(rec.role);
+    const workDate = sanitizeString_(rec.workDate);
     return {
-      userId: sanitizeString_(rec.userId),
+      recipientId: bid ? buildStableIdFromParts_(['br', bid, userId, siteKey, role, workDate]) : '', // [P0-1]
+      userId: userId,
       lineUserId: sanitizeString_(rec.lineUserId),
       weekId: sanitizeString_(rec.weekId),
       siteId: sanitizeString_(rec.siteId),
       siteName: sanitizeString_(rec.siteName),
       siteRaw: sanitizeString_(rec.siteRaw),
-      role: sanitizeString_(rec.role),
-      workDate: sanitizeString_(rec.workDate),
+      role: role,
+      workDate: workDate,
       dateRange: sanitizeString_(rec.dateRange),
       openChatUrl: sanitizeString_(rec.openChatUrl)
     };
@@ -5644,15 +5710,21 @@ function listBroadcastRecipientsByBroadcastId_(ss, broadcastId) {
         ? (dateRangeFrom === dateRangeTo ? dateRangeFrom : dateRangeFrom + '〜' + dateRangeTo)
         : (dateRangeFrom || dateRangeTo);
 
+      const rUserId = idxUserId >= 0 ? sanitizeString_(row[idxUserId]) : '';
+      const rSiteId = idxSiteId >= 0 ? sanitizeString_(row[idxSiteId]) : '';
+      const rSiteRaw = idxSiteRaw >= 0 ? sanitizeString_(row[idxSiteRaw]) : '';
+      const rRole = idxRole >= 0 ? sanitizeString_(row[idxRole]) : '';
+      const rWorkDate = idxWorkDate >= 0 ? sanitizeString_(row[idxWorkDate]) : '';
       out.push({
-        userId: idxUserId >= 0 ? sanitizeString_(row[idxUserId]) : '',
+        recipientId: id ? buildStableIdFromParts_(['br', id, rUserId, rSiteId || rSiteRaw, rRole, rWorkDate]) : '', // [P0-1]
+        userId: rUserId,
         lineUserId: idxLineUserId >= 0 ? sanitizeString_(row[idxLineUserId]) : '',
         weekId: idxWeekId >= 0 ? sanitizeString_(row[idxWeekId]) : '',
-        siteId: idxSiteId >= 0 ? sanitizeString_(row[idxSiteId]) : '',
+        siteId: rSiteId,
         siteName: idxSiteName >= 0 ? sanitizeString_(row[idxSiteName]) : '',
-        siteRaw: idxSiteRaw >= 0 ? sanitizeString_(row[idxSiteRaw]) : '',
-        role: idxRole >= 0 ? sanitizeString_(row[idxRole]) : '',
-        workDate: idxWorkDate >= 0 ? sanitizeString_(row[idxWorkDate]) : '',
+        siteRaw: rSiteRaw,
+        role: rRole,
+        workDate: rWorkDate,
         dateRange: dateRange,
         openChatUrl: idxOpenChatUrl >= 0 ? sanitizeString_(row[idxOpenChatUrl]) : ''
       });
@@ -6071,8 +6143,72 @@ function findApprovalById_(ss, approvalId) {
   return { sheet: null, row: 0, status: '' };
 }
 
+// [P0-3] submit gate: userId 存在・ACTIVE・lineUserId 一致を強制
+function assertSubmitActorValid_(ss, userId, lineUserId, requestId) {
+  if (!userId) {
+    return errorResponse_('E_VALIDATION', 'Validation failed.', { fields: [{ field: 'userId', reason: 'required' }] }, requestId, false);
+  }
+  const sheet = ss.getSheetByName(SHEET_STAFF_);
+  if (!sheet) {
+    return errorResponse_('E_SCHEMA_BROKEN', 'STAFF_MASTER sheet not found.', {}, requestId, false);
+  }
+  const table = readTable_(sheet);
+  if (!table.ok || !table.values || table.values.length <= 1) {
+    // ヘッダー行のみ（データ行なし）= 未登録扱い
+    return errorResponse_('E_STAFF_NOT_FOUND', 'Staff not registered.', { userId: userId }, requestId, false);
+  }
+  const idxUserId   = table.idx.userid;
+  const idxStatus   = table.idx.status;
+  const idxLineUser = table.idx.lineuserid;
+  if (idxUserId < 0 || idxStatus < 0) {
+    return errorResponse_('E_SCHEMA_BROKEN', 'STAFF_MASTER missing required columns (userId, status).', {}, requestId, false);
+  }
+  let staffRow = null;
+  for (let r = 1; r < table.values.length; r++) {
+    if (sanitizeString_(table.values[r][idxUserId]) === userId) {
+      staffRow = table.values[r];
+      break;
+    }
+  }
+  if (!staffRow) {
+    return errorResponse_('E_STAFF_NOT_FOUND', 'Staff not registered.', { userId: userId }, requestId, false);
+  }
+  const staffStatus = sanitizeString_(staffRow[idxStatus]).toUpperCase();
+  if (staffStatus !== 'ACTIVE') {
+    return errorResponse_('E_STAFF_INACTIVE', 'Staff is not active.', { userId: userId, status: staffStatus }, requestId, false);
+  }
+  if (idxLineUser >= 0 && lineUserId) {
+    const masterLineUserId = sanitizeString_(staffRow[idxLineUser]);
+    if (masterLineUserId && masterLineUserId !== lineUserId) {
+      return errorResponse_('E_ACTOR_MISMATCH', 'LINE user mismatch.', { userId: userId }, requestId, false);
+    }
+  }
+  return null;
+}
+
+// [P0-4] fail-close: ロックシート欠損は E_SCHEMA_BROKEN。ensure で作らない。
+function assertMonthWritable_(ss, month, requestId) {
+  const name = SHEET_MONTHLY_LOCK_PREFIX_ + sanitizeString_(month).replace('-', '_');
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    return errorResponse_('E_SCHEMA_BROKEN', 'Monthly lock sheet not found. Run admin setup for target month.', { month: month }, requestId, false);
+  }
+  const lock = findMonthlyLockByMonth_(sheet, month);
+  const status = sanitizeString_(lock.status).toUpperCase();
+  if (status === 'LOCKED') {
+    return errorResponse_('E_MONTH_LOCKED', 'Target month is locked. Post-lock changes must be recorded as adjustment in next month.', { month: month }, requestId, false);
+  }
+  if (status === 'CLOSING') {
+    return errorResponse_('E_CLOSING_MONTH', 'Target month is being closed. Writes are suspended.', { month: month }, requestId, false);
+  }
+  return null;
+}
+
+// [P0-4] 読み取り専用判定（null = シート欠損 = E_SCHEMA_BROKEN、呼び出し元で処理）
 function isMonthLocked_(ss, month) {
-  const sheet = ensureMonthlyLockSheet_(ss, month);
+  const name = SHEET_MONTHLY_LOCK_PREFIX_ + sanitizeString_(month).replace('-', '_');
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) return null;
   const lock = findMonthlyLockByMonth_(sheet, month);
   return lock.row > 0 && sanitizeString_(lock.status).toUpperCase() === 'LOCKED';
 }
@@ -6156,6 +6292,11 @@ function ensureBroadcastLogMonthSheet_(ss, month) {
 
 function ensureFailedJobsMonthSheet_(ss, month) {
   return ensureMonthlyPartitionSheet_(ss, SHEET_FAILED_JOBS_PREFIX_, month, ['failedJobId', 'broadcastId', 'operationId', 'jobType', 'userId', 'lineUserId', 'siteId', 'role', 'workDate', 'errorCode', 'errorMessage', 'payloadJson', 'status', 'retryCount', 'createdAt', 'updatedAt', 'requestId']);
+}
+
+// [P0-1] recipient単位の送信ログシート（monthly partition）
+function ensureBroadcastLogRecipientsSheet_(ss, month) {
+  return ensureMonthlyPartitionSheet_(ss, SHEET_BROADCAST_LOG_RECIPIENTS_PREFIX_, month, ['recipientId', 'broadcastId', 'operationId', 'targetMonth', 'userId', 'lineUserId', 'siteId', 'role', 'workDate', 'sent', 'sentAt', 'errorCode', 'createdAt', 'updatedAt', 'requestId']);
 }
 
 function ensureApprovalQueueMonthSheet_(ss, month) {
