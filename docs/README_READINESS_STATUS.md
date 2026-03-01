@@ -33,6 +33,7 @@ P0は以下（全て v5.0に明記）。
 - lock欠損でOPEN復帰する挙動を放置
 - broadcast重複配信リスクを放置
 - webhook失敗が再処理不能のまま
+- `ADMIN_ALLOWED_IPS` が本番 Worker 環境に未設定のままデプロイされている
 
 ---
 
@@ -53,7 +54,7 @@ P0は以下（全て v5.0に明記）。
 
 - /api/admin/* は Slack署名のみ許可
 - legacy_api_key 経路の廃止
-- ADMIN_ALLOWED_IPS の強制（未設定はfail-close）
+- ADMIN_ALLOWED_IPS の必須設定（未設定は本番デプロイ禁止。fail-open / fail-close のコード実装差異は、必須設定により無意味化する。詳細は ops_rules.md §6 を参照）
 
 **成果物**
 - テスト: **T06** パス

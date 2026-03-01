@@ -1,0 +1,75 @@
+# DO NOT COMMIT REAL SECRETS
+# Copy to .dev.vars for local use
+# worker/.dev.vars is git-ignored
+
+# -------------------------------------------------------
+# Core — required for most routes
+# -------------------------------------------------------
+GAS_ENDPOINT=
+STAFF_TOKEN_FOR_GAS=
+LINE_CHANNEL_SECRET=
+LINE_CHANNEL_ACCESS_TOKEN=
+LIFF_ID=
+WORKER_API_KEY=
+
+# -------------------------------------------------------
+# CORS & Admin
+# -------------------------------------------------------
+ALLOWED_ORIGINS=
+ADMIN_ALLOWED_IPS=
+LINE_ADMIN_USER_IDS=
+
+# -------------------------------------------------------
+# LIFF URLs
+# -------------------------------------------------------
+LIFF_URL=
+LIFF_REGISTER_URL=
+LIFF_TRAFFIC_URL=
+LIFF_EXPENSE_URL=
+LIFF_HOTEL_URL=
+
+# -------------------------------------------------------
+# LINE Rich Menus (optional)
+# -------------------------------------------------------
+LINE_RICHMENU_ID_UNREGISTERED=
+LINE_RICHMENU_ID_REGISTERED=
+
+# -------------------------------------------------------
+# Slack Integration (required if Slack routes used)
+# -------------------------------------------------------
+SLACK_SIGNING_SECRET=
+SLACK_BOT_TOKEN=
+
+# -------------------------------------------------------
+# Gemini OCR (required if OCR routes used)
+# -------------------------------------------------------
+GEMINI_API_KEY=
+GEMINI_MODEL=
+
+# -------------------------------------------------------
+# Google Sheets / Drive direct access (conditional)
+# -------------------------------------------------------
+GOOGLE_SERVICE_ACCOUNT_EMAIL=
+GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=
+GOOGLE_SPREADSHEET_ID=
+GOOGLE_DRIVE_EXPORT_FOLDER_ID=
+
+# -------------------------------------------------------
+# Receipt Storage — R2 (conditional)
+# -------------------------------------------------------
+RECEIPT_PUBLIC_BASE_URL=
+
+# -------------------------------------------------------
+# Idempotency tuning (optional — code defaults apply)
+# -------------------------------------------------------
+IDEMPOTENCY_TTL_SECONDS=
+WEBHOOK_EVENT_TTL_SECONDS=
+IDEMPOTENCY_LOCK_TTL_SECONDS=
+
+# -------------------------------------------------------
+# Legacy aliases (prefer the canonical names above)
+# STAFF_TOKEN is an alias for STAFF_TOKEN_FOR_GAS
+# SPREADSHEET_ID is an alias for GOOGLE_SPREADSHEET_ID
+# -------------------------------------------------------
+STAFF_TOKEN=
+SPREADSHEET_ID=

@@ -25,6 +25,9 @@
 | [action-contracts.md](./action-contracts.md) | HTTP APIとGAS actionの責務境界・契約対応表 |
 | [data-boundary.md](./data-boundary.md) | Worker/GAS/Sheetsのデータ境界ルール |
 | [DX_CORE.md](./DX_CORE.md) | 実装監査メモ（SoTからの逸脱点と是正状況） |
+| [ENVIRONMENT.md](./ENVIRONMENT.md) | 環境変数の正本（全変数の分類・必須条件・デプロイチェックリスト） |
+| [ENVIRONMENT_RUNBOOK.md](./ENVIRONMENT_RUNBOOK.md) | 環境構築・シークレット設定・デプロイ前検証の手順書 |
+| [ENVIRONMENT_PROMPT.md](./ENVIRONMENT_PROMPT.md) | AI監査プロンプト（環境変数の自動検証ゲート指示） |
 
 ## 更新ルール（docs -> code）
 
