@@ -9,4 +9,3 @@ gas/**/.clasp.json
 gas_bak_*/**/.clasp.json
 tmp/
 *.docx
-*.docx
