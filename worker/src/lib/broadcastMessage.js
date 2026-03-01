@@ -92,15 +92,40 @@ export function buildBroadcastButton(label, uri, style = 'secondary') {
  */
 export async function executeBroadcastDelivery(env, recipients, requestId, options = {}) {
   const includeRecipientMeta = Boolean(options.includeRecipientMeta);
+  const operationId = String(options.operationId || '').trim(); // [P0-1]
+  const alreadySentIds = options.alreadySentIds instanceof Set ? options.alreadySentIds : new Set(); // [P0-1]
+  const kv = env?.IDEMPOTENCY_KV; // [P0-1]
   const deliveries = [];
   let pushed = 0;
   let failed = 0;
+  let alreadySent = 0; // [P0-1]
 
   for (const recipient of recipients) {
     const lineUserId = String(recipient?.lineUserId || '').trim();
+    const recipientId = String(recipient?.recipientId || '').trim(); // [P0-1]
+
+    // [P0-1] skip recipients already sent in a previous run
+    if (recipientId && alreadySentIds.has(recipientId)) {
+      alreadySent += 1;
+      const entry = {
+        recipientId,
+        userId: String(recipient?.userId || ''),
+        lineUserId,
+        status: 'already_sent',
+        errorCode: ''
+      };
+      if (includeRecipientMeta) {
+        entry.role = String(recipient?.role || '');
+        entry.siteId = String(recipient?.siteId || '');
+        entry.workDate = String(recipient?.workDate || '');
+      }
+      deliveries.push(entry);
+      continue;
+    }
 
     if (!lineUserId) {
       const entry = {
+        recipientId, // [P0-1]
         userId: String(recipient?.userId || ''),
         lineUserId: '',
         status: 'failed',
@@ -121,7 +146,12 @@ export async function executeBroadcastDelivery(env, recipients, requestId, optio
 
     if (pushResult.ok) {
       pushed += 1;
+      // [P0-1] immediately mark recipient as sent in KV for cross-request dedup
+      if (recipientId && operationId && kv) {
+        try { await kv.put(`broadcast:sent:${operationId}:${recipientId}`, '1', { expirationTtl: 604800 }); } catch { /* ignore */ }
+      }
       const entry = {
+        recipientId, // [P0-1]
         userId: String(recipient?.userId || ''),
         lineUserId,
         status: 'sent',
@@ -136,6 +166,7 @@ export async function executeBroadcastDelivery(env, recipients, requestId, optio
     } else {
       failed += 1;
       const entry = {
+        recipientId, // [P0-1]
         userId: String(recipient?.userId || ''),
         lineUserId,
         status: 'failed',
@@ -150,5 +181,5 @@ export async function executeBroadcastDelivery(env, recipients, requestId, optio
     }
   }
 
-  return { pushed, failed, deliveries };
+  return { pushed, failed, alreadySent, deliveries }; // [P0-1] add alreadySent
 }
