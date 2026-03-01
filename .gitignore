@@ -8,3 +8,4 @@ node_modules/
 gas/**/.clasp.json
 gas_bak_*/**/.clasp.json
 tmp/
+*.docx
