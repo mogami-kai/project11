@@ -6,12 +6,10 @@ import {
   resolvePayloadHash,
   setIdempotentResponse
 } from '../lib/idempotency.js';
-import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
 import { verifySlackSignature } from '../clients/slack.js';
 import { pushLineMessage } from '../clients/line.js';
 import { buildError, fail, json } from '../lib/response.js';
-import { requireAdmin } from '../lib/access.js';
 import { sanitizeMonth, sanitizeRequestId } from '../lib/validate.js';
 import { buildBroadcastFlexMessage, executeBroadcastDelivery } from '../lib/broadcastMessage.js';
 
@@ -370,38 +368,16 @@ export async function handleAdminBroadcastRetryFailed(request, env, meta, reques
 
 async function parseAdminRequest(request, env, meta) {
   const rawBody = await request.text();
-  const hasSlackSignature = Boolean(request.headers.get('x-slack-signature'));
 
-  if (hasSlackSignature) {
-    const verified = await verifySlackSignature(rawBody, request.headers, env.SLACK_SIGNING_SECRET);
-    if (!verified.ok) {
-      return {
-        ok: false,
-        response: fail(
-          buildError('E_UNAUTHORIZED', 'Invalid Slack signature.', { reason: verified.reason }, false),
-          meta,
-          { status: 401 }
-        )
-      };
-    }
-
-    let body;
-    try {
-      body = rawBody ? JSON.parse(rawBody) : {};
-    } catch {
-      return {
-        ok: false,
-        response: fail(buildError('E_BAD_REQUEST', 'Invalid JSON.', {}, false), meta, { status: 400 })
-      };
-    }
-
-    const actorSlackUserId = String(body?.actorSlackUserId || request.headers.get('x-slack-user-id') || '').trim();
+  const verified = await verifySlackSignature(rawBody, request.headers, env.SLACK_SIGNING_SECRET);
+  if (!verified.ok) {
     return {
-      ok: true,
-      body,
-      actorSlackUserId,
-      actorType: 'slack',
-      defaultOperationId: deriveSlackOperationId(request, body)
+      ok: false,
+      response: fail(
+        buildError('E_UNAUTHORIZED', 'Slack signature required.', { reason: verified.reason }, false),
+        meta,
+        { status: 401 }
+      )
     };
   }
 
@@ -415,26 +391,13 @@ async function parseAdminRequest(request, env, meta) {
     };
   }
 
-  const auth = await authenticateRequest(request, env, meta, {
-    allowApiKey: true,
-    allowLiffIdToken: false
-  });
-  if (!auth.ok) return auth;
-
-  const adminCheck = requireAdmin(request, env, meta, { requireIpAllow: true });
-  if (!adminCheck.ok) {
-    return {
-      ok: false,
-      response: adminCheck.response
-    };
-  }
-
+  const actorSlackUserId = String(body?.actorSlackUserId || request.headers.get('x-slack-user-id') || '').trim();
   return {
     ok: true,
     body,
-    actorSlackUserId: String(body?.actorSlackUserId || '').trim(),
-    actorType: 'legacy_api_key',
-    defaultOperationId: sanitizeRequestId(body?.operationId) || ''
+    actorSlackUserId,
+    actorType: 'slack',
+    defaultOperationId: deriveSlackOperationId(request, body)
   };
 }
 

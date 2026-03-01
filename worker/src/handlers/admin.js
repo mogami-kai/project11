@@ -242,7 +242,7 @@ function isValidUrl(value) {
 
 function isAdminIpAllowed(request, env) {
   const allowRaw = String(env.ADMIN_ALLOWED_IPS || '').trim();
-  if (!allowRaw) return true;
+  if (!allowRaw) return false;
 
   const currentIp = String(request.headers.get('cf-connecting-ip') || '').trim();
   if (!currentIp) return false;
