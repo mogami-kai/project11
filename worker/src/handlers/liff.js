@@ -1,5 +1,7 @@
+import { getLiffId, getLiffUrls } from '../lib/env.js';
+
 export function renderRegisterLiffHtml(env) {
-  const registerUrl = String(env.LIFF_REGISTER_URL || '').trim();
+  const { registerUrl } = getLiffUrls(env);
   const escapedUrl = registerUrl.replace(/"/g, '&quot;');
 
   return `<!doctype html>
@@ -24,7 +26,7 @@ export function renderRegisterLiffHtml(env) {
       ${
         registerUrl
           ? `<a class="btn" href="${escapedUrl}">登録ページを開く</a>`
-          : '<p class="hint">LIFF_REGISTER_URL が未設定です。運用担当へ連絡してください。</p>'
+          : '<p class="hint">LIFF_REGISTER_URL/LIFF_URL が未設定です。運用担当へ連絡してください。</p>'
       }
     </div>
   </div>
@@ -153,6 +155,7 @@ export function renderStatusPageHtml() {
 }
 
 export function renderTrafficLiffHtml(env) {
+  const liffId = getLiffId(env, 'traffic').replace(/"/g, '\\"');
   return `<!doctype html>
 <html lang="ja">
 <head>
@@ -168,7 +171,7 @@ export function renderTrafficLiffHtml(env) {
 
   <script>
     async function main() {
-      await liff.init({ liffId: "${String(env.LIFF_ID || '').replace(/"/g, '\\"')}" });
+      await liff.init({ liffId: "${liffId}" });
       if (!liff.isLoggedIn()) {
         liff.login();
         return;
@@ -195,6 +198,69 @@ export function renderTrafficLiffHtml(env) {
             roundTrip: '片道',
             submitMethod: 'normal',
             memo: 'worker-hosted-liff'
+          })
+        });
+
+        const data = await res.json();
+        alert(JSON.stringify(data));
+      });
+    }
+
+    main().catch((e) => {
+      alert('LIFF初期化エラー: ' + String(e && e.message ? e.message : e));
+    });
+  </script>
+</body>
+</html>`;
+}
+
+export function renderExpenseLiffHtml(env) {
+  const liffId = getLiffId(env, 'expense').replace(/"/g, '\\"');
+  return `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Expense v1</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+  <h2>経費申請（Worker配信ページ）</h2>
+  <p>本番運用は <code>liff/index.html</code> を静的配信してください。</p>
+  <button id="submit">テスト送信</button>
+
+  <script>
+    async function main() {
+      await liff.init({ liffId: "${liffId}" });
+      if (!liff.isLoggedIn()) {
+        liff.login();
+        return;
+      }
+
+      const profile = await liff.getProfile();
+      const idToken = liff.getIDToken();
+
+      document.getElementById('submit').addEventListener('click', async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        const res = await fetch('/api/expense/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(idToken ? { Authorization: 'Bearer ' + idToken } : {})
+          },
+          body: JSON.stringify({
+            userId: profile.userId,
+            work: {
+              workDate: today,
+              site: 'P_TEST'
+            },
+            expense: {
+              category: '交通費',
+              amount: 1000,
+              memo: 'worker-hosted-expense-liff'
+            },
+            paymentMethod: 'advance',
+            name: 'テスト'
           })
         });
 

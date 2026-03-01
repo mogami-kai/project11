@@ -64,6 +64,15 @@ function hasValue(value) {
   return String(value).trim() !== '';
 }
 
+function firstNonEmptyEnvValue(env, keys) {
+  const list = Array.isArray(keys) ? keys : [];
+  for (const key of list) {
+    const value = String(env?.[key] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
 function hasGasToken(env) {
   return hasValue(env?.STAFF_TOKEN_FOR_GAS) || hasValue(env?.STAFF_TOKEN);
 }
@@ -117,4 +126,71 @@ export function validateEnvForScheduled(env) {
     ok: missing.length === 0,
     missing
   };
+}
+
+// === LIFF env adapter (SoT-first) ===
+
+function pickFirst_(env, keys) {
+  for (const k of keys) {
+    const v = env?.[k];
+    if (typeof v === "string" && v.trim() !== "") return v.trim();
+  }
+  return "";
+}
+
+/**
+ * screen: "register" | "traffic" | "expense" | "status"
+ * SoT-first: LIFF_ID_* then legacy LIFF_ID
+ */
+export function getLiffId(env, screen) {
+  switch (screen) {
+    case "register":
+      return pickFirst_(env, ["LIFF_ID_REGISTER", "LIFF_ID"]);
+    case "traffic":
+      return pickFirst_(env, ["LIFF_ID_TRAFFIC", "LIFF_ID"]);
+    case "expense":
+      return pickFirst_(env, ["LIFF_ID_EXPENSE", "LIFF_ID"]);
+    case "status":
+      return pickFirst_(env, ["LIFF_ID_STATUS", "LIFF_ID"]);
+    default:
+      return pickFirst_(env, ["LIFF_ID", "LIFF_ID_TRAFFIC", "LIFF_ID_REGISTER", "LIFF_ID_EXPENSE", "LIFF_ID_STATUS"]);
+  }
+}
+
+/**
+ * SoT-first: LIFF_URL_* then legacy LIFF_*_URL then legacy LIFF_URL
+ */
+export function getLiffUrl(env, screen) {
+  switch (screen) {
+    case "register":
+      return pickFirst_(env, ["LIFF_URL_REGISTER", "LIFF_REGISTER_URL", "LIFF_URL"]);
+    case "traffic":
+      return pickFirst_(env, ["LIFF_URL_TRAFFIC", "LIFF_TRAFFIC_URL", "LIFF_URL"]);
+    case "expense":
+      return pickFirst_(env, ["LIFF_URL_EXPENSE", "LIFF_EXPENSE_URL", "LIFF_URL"]);
+    case "status":
+      return pickFirst_(env, ["LIFF_URL_STATUS", "LIFF_STATUS_URL", "LIFF_URL"]);
+    default:
+      return pickFirst_(env, ["LIFF_URL"]);
+  }
+}
+
+export function getLiffUrls(env) {
+  return {
+    registerUrl: getLiffUrl(env, "register"),
+    trafficUrl: getLiffUrl(env, "traffic"),
+    expenseUrl: getLiffUrl(env, "expense"),
+    statusUrl: getLiffUrl(env, "status"),
+  };
+}
+
+/**
+ * 互換：既存コードが resolveLiffEnv を呼んでいる場合用
+ */
+export function resolveLiffEnv(env, screen = "traffic") {
+  const liffId = getLiffId(env, screen);
+  const urls = getLiffUrls(env);
+  const baseUrl = pickFirst_(env, ["LIFF_URL"]); // legacy base
+
+  return { liffId, baseUrl, ...urls };
 }

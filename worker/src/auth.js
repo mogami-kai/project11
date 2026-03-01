@@ -1,4 +1,5 @@
 import { fetchWithRetry } from './lib/fetch.js';
+import { getLiffId } from './lib/env.js';
 import { buildError, fail } from './lib/response.js';
 import { sha256Hex } from './util/hash.js';
 import { safeLog } from './lib/redact.js';
@@ -61,22 +62,30 @@ async function verifyLineIdToken(idToken, liffId, requestId, env) {
 }
 
 export async function authenticateRequest(request, env, meta, options = {}) {
-  const { allowApiKey = true, allowLiffIdToken = true } = options;
+  const { allowApiKey = true, allowLiffIdToken = true, liffScreen } = options;
 
   if (allowApiKey) {
     const keyAuth = validateApiKeyAuth(request, env);
     if (keyAuth.ok) return { ok: true, mode: 'api-key', userId: '' };
   }
 
-  if (allowLiffIdToken) {
-    const bearer = getBearerToken(request);
-    if (bearer) {
-      if (!env.LIFF_ID) {
-        return { ok: false, response: fail(buildError('E_CONFIG', 'LIFF_ID is missing.', {}, false), meta, { status: 500 }) };
-      }
-      const verified = await verifyLineIdToken(bearer, String(env.LIFF_ID).trim(), meta.requestId, env);
-      if (verified.ok) return { ok: true, mode: 'liff-id-token', userId: sanitizeUserId(verified.userId) };
+  const bearer = getBearerToken(request);
+
+  // STAFF_BEARER_TOKEN: 共有スタッフトークン（API keyの代替、dev/test用）
+  if (bearer) {
+    const staffBearer = String(env.STAFF_BEARER_TOKEN || '').trim();
+    if (staffBearer && bearer === staffBearer) {
+      return { ok: true, mode: 'staff-bearer', userId: '' };
     }
+  }
+
+  if (allowLiffIdToken && bearer) {
+    const liffId = getLiffId(env, liffScreen);
+    if (!liffId) {
+      return { ok: false, response: fail(buildError('E_CONFIG', 'LIFF_ID is missing.', {}, false), meta, { status: 500 }) };
+    }
+    const verified = await verifyLineIdToken(bearer, liffId, meta.requestId, env);
+    if (verified.ok) return { ok: true, mode: 'liff-id-token', userId: sanitizeUserId(verified.userId) };
   }
 
   return { ok: false, response: fail(buildError('E_UNAUTHORIZED', 'Unauthorized.', {}, false), meta, { status: 401 }) };

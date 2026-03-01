@@ -7,7 +7,7 @@ import { handleDashboardMonth } from './handlers/dashboard.js';
 import { handleExpenseCreate } from './handlers/expense.js';
 import { handleHotelPush } from './handlers/hotel.js';
 import { handleHotelScreenshotProcess } from './handlers/hotelScreenshot.js';
-import { renderRegisterLiffHtml, renderStatusPageHtml, renderTrafficLiffHtml } from './handlers/liff.js';
+import { renderExpenseLiffHtml, renderRegisterLiffHtml, renderStatusPageHtml, renderTrafficLiffHtml } from './handlers/liff.js';
 import { handleMonthlyExport } from './handlers/monthly.js';
 import { handleOcrExtract } from './handlers/ocr.js';
 import { handleRegisterUpsert } from './handlers/register.js';
@@ -59,7 +59,8 @@ const ROUTE_METHODS = new Map([
   ['/webhook', ['POST']],
   ['/liff/register', ['GET']],
   ['/liff/status', ['GET']],
-  ['/liff/traffic', ['GET']]
+  ['/liff/traffic', ['GET']],
+  ['/liff/expense', ['GET']]
 ]);
 
 const DEBUG_ROUTE_LIST = Array.from(ROUTE_METHODS.keys());
@@ -111,6 +112,8 @@ export async function routeFetch(request, env, ctx) {
         return responder.withCors(await handleDashboardMonth(request, env, meta, requestId, url));
       case 'GET /liff/traffic':
         return responder.withCors(htmlNoStoreResponse(renderTrafficLiffHtml(env)));
+      case 'GET /liff/expense':
+        return responder.withCors(htmlNoStoreResponse(renderExpenseLiffHtml(env)));
       case 'GET /liff/status':
         return responder.withCors(htmlNoStoreResponse(renderStatusPageHtml()));
       case 'GET /liff/register':
