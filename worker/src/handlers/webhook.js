@@ -9,6 +9,7 @@ import {
 import { buildError, createMeta, fail, ok, withCorsHeaders } from '../lib/response.js';
 import { sha256Hex } from '../util/hash.js';
 import { safeLog } from '../lib/redact.js';
+import { getLiffUrls } from '../lib/env.js';
 import { ymJstFromEpoch } from '../util/time.js';
 import { tryWriteOpsLogAlert } from '../util/ops.js';
 import { buildHelpMessage, buildMenuMessage, handleHotelPostbackEvent } from './hotel.js';
@@ -182,7 +183,7 @@ async function processSingleLineEvent(event, env, requestId) {
         }
       }
 
-      const registerUrl = String(env.LIFF_REGISTER_URL || env.LIFF_URL || '').trim();
+      const { registerUrl } = getLiffUrls(env);
       const guideMessage = { type: 'text', text: buildRegisterGuideText(registerUrl) };
       const guidePush = await pushLineMessage(env, userId, [guideMessage], requestId);
       if (!guidePush.ok) {
@@ -326,8 +327,8 @@ async function buildReplyMessagesForText(text, env, requestId, userId, month, si
   }
 
   if (text.includes('交通')) {
-    const liffUrl = String(env.LIFF_URL || '').trim();
-    return [{ type: 'text', text: liffUrl ? `交通費申請はこちら:\n${liffUrl}` : 'LIFF_URL が未設定です。運用担当へ連絡してください。' }];
+    const { trafficUrl } = getLiffUrls(env);
+    return [{ type: 'text', text: trafficUrl ? `交通費申請はこちら:\n${trafficUrl}` : 'LIFF_TRAFFIC_URL/LIFF_URL が未設定です。運用担当へ連絡してください。' }];
   }
 
   if (text.includes('状況') || text.includes('ステータス') || text.includes('未提出')) {

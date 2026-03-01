@@ -1,4 +1,5 @@
 import { pushLineMessage } from '../clients/line.js';
+import { getLiffUrls } from './env.js';
 
 /**
  * Broadcast Flex Message builder (canonical)
@@ -6,14 +7,15 @@ import { pushLineMessage } from '../clients/line.js';
  * Used by: handlers/broadcast.js, handlers/slack.js
  */
 export function buildBroadcastFlexMessage(recipient, env) {
+  const { trafficUrl: liffTrafficUrl, expenseUrl: liffExpenseUrl, hotelUrl: liffHotelUrl } = getLiffUrls(env);
   const weekId = String(recipient?.weekId || '').trim();
   const siteName = String(recipient?.siteName || recipient?.siteRaw || '').trim() || '現場未設定';
   const role = String(recipient?.role || '').trim() || '-';
   const dateRange = String(recipient?.dateRange || '').trim();
   const openChatUrl = sanitizeBroadcastUrl(recipient?.openChatUrl);
-  const trafficUrl = sanitizeBroadcastUrl(env.LIFF_TRAFFIC_URL || env.LIFF_URL);
-  const expenseUrl = sanitizeBroadcastUrl(env.LIFF_EXPENSE_URL || env.LIFF_URL);
-  const hotelUrl = sanitizeBroadcastUrl(env.LIFF_HOTEL_URL || env.LIFF_URL);
+  const trafficUrl = sanitizeBroadcastUrl(liffTrafficUrl);
+  const expenseUrl = sanitizeBroadcastUrl(liffExpenseUrl);
+  const hotelUrl = sanitizeBroadcastUrl(liffHotelUrl);
 
   const footerContents = [];
   if (openChatUrl) {

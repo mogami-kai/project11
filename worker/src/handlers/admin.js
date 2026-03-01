@@ -2,7 +2,7 @@ import { authenticateRequest } from '../auth.js';
 import { callGas } from '../clients/gas.js';
 import { fetchLineBotInfo, mapLineErrorCode } from '../clients/line.js';
 import { buildError, fail, json, ok } from '../lib/response.js';
-import { parseAllowedOrigins } from '../lib/env.js';
+import { getLiffId, getLiffUrls, parseAllowedOrigins } from '../lib/env.js';
 import { sha256Hex, stableStringify } from '../util/hash.js';
 import { sanitizeMonth, sanitizeUserId } from '../lib/validate.js';
 import { safeLog } from '../lib/redact.js';
@@ -206,6 +206,8 @@ export async function handleAdminShiftRawRecent(request, env, meta, requestId, u
 function buildEnvDebugSnapshot(env, origin, allowedOrigin) {
   const allowedOrigins = parseAllowedOrigins(env.ALLOWED_ORIGINS);
   const invalidOrigins = allowedOrigins.filter((o) => !isValidUrl(o));
+  const liffId = getLiffId(env);
+  const liffUrls = getLiffUrls(env);
 
   const present = {
     GAS_ENDPOINT: Boolean(env.GAS_ENDPOINT),
@@ -214,8 +216,11 @@ function buildEnvDebugSnapshot(env, origin, allowedOrigin) {
     LINE_CHANNEL_ACCESS_TOKEN: Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),
     LINE_CHANNEL_SECRET: Boolean(env.LINE_CHANNEL_SECRET),
     ALLOWED_ORIGINS: Boolean(String(env.ALLOWED_ORIGINS || '').trim()),
-    LIFF_URL: Boolean(env.LIFF_URL),
-    LIFF_ID: Boolean(env.LIFF_ID),
+    LIFF_URL: Boolean(liffUrls.baseUrl),
+    LIFF_ID: Boolean(liffId),
+    LIFF_REGISTER_URL: Boolean(liffUrls.registerUrl),
+    LIFF_TRAFFIC_URL: Boolean(liffUrls.trafficUrl),
+    LIFF_EXPENSE_URL: Boolean(liffUrls.expenseUrl),
     GEMINI_API_KEY: Boolean(env.GEMINI_API_KEY)
   };
 

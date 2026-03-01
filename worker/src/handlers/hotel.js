@@ -12,6 +12,7 @@ import {
   setIdempotentResponse
 } from '../lib/idempotency.js';
 import { safeLog } from '../lib/redact.js';
+import { getLiffUrls } from '../lib/env.js';
 import { sanitizeDateYmd, sanitizeRequestId, sanitizeUserId } from '../lib/validate.js';
 import { finalizeSendGuard, reserveSendGuard } from './reminder.js';
 
@@ -293,7 +294,7 @@ export async function handleHotelPostbackEvent(event, env, requestId) {
 }
 
 export function buildMenuMessage(env) {
-  const liffUrl = String(env.LIFF_URL || '').trim();
+  const { trafficUrl: liffUrl } = getLiffUrls(env);
   const lines = [
     'メニュー',
     '・交通費（リッチメニュー）',
@@ -310,7 +311,7 @@ export function buildMenuMessage(env) {
 }
 
 export function buildHelpMessage(env) {
-  const liffUrl = String(env.LIFF_URL || '').trim();
+  const { trafficUrl: liffUrl } = getLiffUrls(env);
   const lines = [
     '【ヘルプ】',
     '1) 交通費: リッチメニュー「交通費」からフォームへ',

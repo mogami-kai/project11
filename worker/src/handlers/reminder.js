@@ -11,6 +11,7 @@ import {
   setIdempotentResponse
 } from '../lib/idempotency.js';
 import { safeLog } from '../lib/redact.js';
+import { getLiffUrls } from '../lib/env.js';
 import { ymdJstFromEpoch } from '../util/time.js';
 import { sanitizeDateYmd, sanitizeRequestId, sanitizeUserId } from '../lib/validate.js';
 import { pushLineMessage } from '../clients/line.js';
@@ -162,7 +163,7 @@ export async function dispatchReminder(env, meta, requestId, options = {}) {
   let failed = 0;
   let skipped = 0;
 
-  const liffUrl = String(env.LIFF_URL || '').trim();
+  const { trafficUrl: liffUrl } = getLiffUrls(env);
 
   for (const target of targets) {
     const userId = sanitizeUserId(target?.userId);
@@ -205,7 +206,7 @@ export async function dispatchReminder(env, meta, requestId, options = {}) {
       '【交通費リマインド】',
       `${date}時点で未提出日があります。`,
       `未提出: ${missingDates.join(', ')}`,
-      liffUrl ? `提出はこちら: ${liffUrl}` : '提出URL（LIFF_URL）が未設定です。運用担当へ連絡してください。'
+      liffUrl ? `提出はこちら: ${liffUrl}` : '提出URL（LIFF_TRAFFIC_URL/LIFF_URL）が未設定です。運用担当へ連絡してください。'
     ];
 
     const pushResult = await pushLineMessage(env, lineUserId, [{ type: 'text', text: textLines.join('\n') }], requestId);
